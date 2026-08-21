@@ -4,6 +4,9 @@
 -->
 <script lang="ts">
   import { replace } from "svelte-spa-router";
+  import { signOut } from "firebase/auth";
+  import {auth} from "../data/firebase";
+  import {getUser} from "../data/authState.svelte";
   import BackButton from "../components/BackButton.svelte";
   import Button from "../components/Button.svelte";
   import ButtonGroup from "../components/ButtonGroup.svelte";
@@ -93,6 +96,10 @@
     }
   }
 
+  async function handleSignOut() {
+    await signOut(auth);
+  }
+
   let tapCount = 0;
 </script>
 
@@ -101,6 +108,16 @@
     <BackButton href="/" />
     <Header>Settings</Header>
 
+    <SectionHeader>Account</SectionHeader>
+    <p>
+      {#if getUser()}
+        Signed in as <strong>{getUser()?.email}</strong>
+      {/if}
+    </p>
+    <p>
+      <Button small on:click={handleSignOut}>Sign out</Button>
+    </p>
+    
     {#if FEEDBACK_LINK}
       <SectionHeader>Feedback</SectionHeader>
       <a href={FEEDBACK_LINK} target="_blank">Send feedback about this app</a>
