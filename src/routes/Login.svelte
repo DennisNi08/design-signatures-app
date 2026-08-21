@@ -12,8 +12,7 @@
     error = undefined;
     signingIn = true;
     try {
-      const result = await signInWithPopup(auth, provider);
-      console.log("Signed in as:", result.user.uid);
+      await signInWithPopup(auth, provider);
       push("/");
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);

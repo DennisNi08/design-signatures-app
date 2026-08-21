@@ -3,7 +3,7 @@
   SPDX-License-Identifier: BSD-3-Clause
 -->
 <script lang="ts">
-  import Router, { type RouteDefinition } from "svelte-spa-router";
+  import Router, { type RouteDefinition, push } from "svelte-spa-router";
   import { createPresets } from "./data/designModelPresets";
   import { awaitObjectUpgradeIfNeeded } from "./data/upgradeObjects";
   import AboutProject from "./routes/about/AboutProject.svelte";
@@ -31,9 +31,23 @@
   import Install from "./routes/Install.svelte";
   import Onboarding from "./routes/Onboarding.svelte";
   import Login from "./routes/Login.svelte"
+  import { isLoading, getUser } from "./data/authState.svelte";
+  import { onMount } from "svelte";
 
   awaitObjectUpgradeIfNeeded();
   createPresets(); // noop, but keeps the linter happy :)
+
+  let currentHash = $state(window.location.hash);
+
+  onMount(() => {
+    const updateHash = () => {
+      currentHash = window.location.hash;
+    };
+    window.addEventListener("hashchange", updateHash);
+    return () => {
+      window.removeEventListener("hashchange", updateHash);
+    };
+  });
 
   const routes: RouteDefinition = {
     "/": Home, // Home
@@ -86,9 +100,24 @@
 
     "*": NotFound, // Not found
   };
-</script>
 
-<Router {routes} />
+  $effect(() => {
+    if (isLoading())return;
+
+    const onLoginPage = currentHash.startsWith("#/login");;
+
+    if (!getUser() && !onLoginPage) {
+      push("/login");
+    } else if (getUser() && onLoginPage) {
+      push("/");
+    }
+  });
+</script>
+{#if isLoading()}
+  <p>Loading...</p>
+  {:else}
+  <Router {routes} />
+{/if}
 
 <style lang="scss">
   @use "styles/colors" as *;
