@@ -30,12 +30,14 @@
   import Update from "./routes/Update.svelte";
   import Install from "./routes/Install.svelte";
   import Onboarding from "./routes/Onboarding.svelte";
+  import Login from "./routes/Login.svelte"
 
   awaitObjectUpgradeIfNeeded();
   createPresets(); // noop, but keeps the linter happy :)
 
   const routes: RouteDefinition = {
     "/": Home, // Home
+    "/login": Login, //Login Page,
 
     "/new/realtime/*": NewRealtimeProject,
     "/new/realtime": RedirectAddPath,
