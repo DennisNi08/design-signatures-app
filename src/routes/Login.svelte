@@ -1,37 +1,41 @@
-
 <script lang="ts">
-  import { onMount} from "svelte";
   import PageHeader from "../components/PageHeader.svelte";
+  import { auth } from "../data/firebase";
+  import { push } from "svelte-spa-router";
+  import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 
-  let buttonContainer: HTMLDivElement;
+  const provider = new GoogleAuthProvider();
+  let error: string | undefined = $state();
+  let signingIn = $state(false);
 
-  interface CredentialReponse {
-    credential: string;
-    select_by?: string;
+  async function login() {
+    error = undefined;
+    signingIn = true;
+    try {
+      const result = await signInWithPopup(auth, provider);
+      console.log("Signed in as:", result.user.uid);
+      push("/");
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+      console.error("Popup sign-in failed:", err);
+    } finally {
+      signingIn = false;
+    }
   }
-
-  function handleCredentialResponse(response:any){
-    console.log("Encoded JWT ID token: "+response.credential)
-  }
-
-  onMount(() => {
-    window.google.accounts.id.initialize({
-      client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
-      callback: handleCredentialResponse,
-    });
-
-    window.google.accounts.id.renderButton(buttonContainer, {
-      type: "standard",
-      size: "large",
-      theme: "outline",
-      text: "sign_in_with",
-      shape: "rectangular",
-      logo_alignment: "left",
-    });
-  });
 </script>
 
 <main class="login">
   <PageHeader />
-  <div bind:this={buttonContainer}></div>
+  <button onclick={login} disabled={signingIn}>
+    {signingIn ? "Signing in…" : "Sign in with Google"}
+  </button>
+  {#if error}
+    <p class="error">{error}</p>
+  {/if}
 </main>
+
+<style lang="scss">
+  .error {
+    color: red;
+  }
+</style>
