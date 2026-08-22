@@ -33,6 +33,7 @@
   import Login from "./routes/Login.svelte"
   import { isLoading, getUser } from "./data/authState.svelte";
   import { onMount } from "svelte";
+  import FirestoreTest from "./routes/FirestoreTest.svelte"
 
   awaitObjectUpgradeIfNeeded();
   createPresets(); // noop, but keeps the linter happy :)
@@ -97,6 +98,8 @@
     "/dev/dbeditor/": DBEditor, // Database editor
     "/dev/component-library/*": ComponentLibrary, // Component library
     "/dev/component-library": RedirectAddPath,
+
+    "/firestore-test": FirestoreTest, // Firestore test page
 
     "*": NotFound, // Not found
   };
