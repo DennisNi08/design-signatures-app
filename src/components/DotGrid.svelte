@@ -259,6 +259,7 @@
   function addEntry() {
     entryGraphMax = 0;
     let entry = newAsyncEntry();
+    entry.projectId = project.id;
     entry.period = new Date(viewDate);
     entry.data = project.designModel.activities.map((_) => ({
       value: 0,

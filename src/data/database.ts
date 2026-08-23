@@ -7,6 +7,9 @@ import defer from "../util/defer";
 import { VERSION } from "./buildData";
 import * as Schema from "./schema";
 import { initializeConfiguration, upgradeDatabase } from "./upgradeDatabase";
+import {
+  doc, setDoc, deleteDoc, getDoc, collection, getDocs, where, query} from "firebase/firestore";
+import { db } from "./firebase";
 
 const DB_NAME = "design-awareness-local-store";
 const META_KEY = "@meta";
@@ -129,10 +132,14 @@ function transaction(
  * transaction is complete. Use update to update an existing entry.
  */
 async function add(store: ObjectStoreName, data: any) {
-  const db = await getDb();
-  const { complete, objectStore } = transaction(db, store, "readwrite");
-  objectStore.add(data);
-  await complete;
+  if (store === "_Config") {
+    const idb = await getDb();
+    const { complete, objectStore } = transaction(idb, store, "readwrite");
+    objectStore.add(data);
+    await complete;
+    return;
+  }
+   await setDoc(doc(db, store, data.id), data);
 }
 
 /**
@@ -140,35 +147,47 @@ async function add(store: ObjectStoreName, data: any) {
  * is complete. Use to update an entry that is already saved.
  */
 async function update(store: ObjectStoreName, data: any) {
-  const db = await getDb();
-  const { complete, objectStore } = transaction(db, store, "readwrite");
-  objectStore.put(data);
-  await complete;
+  if (store === "_Config") {
+    const idb = await getDb();
+    const { complete, objectStore } = transaction(idb, store, "readwrite");
+    objectStore.put(data);
+    await complete;
+    return;
+  }
+  await setDoc(doc(db, store, data.id), data);
 }
 
 /**
  * Remove entry with given id from the given datastore.
  */
 async function remove(store: ObjectStoreName, id: DBID) {
-  const db = await getDb();
-  const { complete, objectStore } = transaction(db, store, "readwrite");
-  objectStore.delete(id);
-  await complete;
+  if (store === "_Config") {
+    const idb = await getDb();
+    const { complete, objectStore } = transaction(idb, store, "readwrite");
+    objectStore.delete(id);
+    await complete;
+    return;
+  }
+  await deleteDoc(doc(db, store, id));
 }
 
 /**
  * Resolves to the stored data for the given id from the given datastore.
  */
 async function get(store: ObjectStoreName, id: DBID): Promise<object | null> {
-  const db = await getDb();
-  const { objectStore } = transaction(db, store);
-  const request = objectStore.get(id);
-  return (
-    (await new Promise((res, rej) => {
-      request.onerror = rej;
-      request.onsuccess = res;
-    })) as any
-  )["target"]["result"];
+  if (store === "_Config") {
+    const idb = await getDb();
+    const { objectStore } = transaction(idb, store);
+    const request = objectStore.get(id);
+    return (
+      (await new Promise((res, rej) => {
+        request.onerror = rej;
+        request.onsuccess = res;
+      })) as any
+    )["target"]["result"];
+  }
+  const snap = await getDoc(doc(db, store, id));
+  return snap.exists() ? snap.data() : null;
 }
 
 export const rawDatabaseOperations = {
@@ -223,21 +242,7 @@ const objStore = {
  * Resolves to the IDs of all entries in the given datastore.
  */
 export function getAll(store: Schema.EntityName): Promise<DBID[]> {
-  return new Promise(async (res, rej) => {
-    const db = await getDb();
-    const { objectStore } = transaction(db, store);
-    const request = objectStore.getAllKeys();
-    request.onerror = rej;
-    request.onsuccess = function (evt: Event) {
-      if (DEBUG_DELAY) {
-        // @ts-ignore
-        setTimeout(() => res(evt.target.result), DEBUG_DELAY);
-      } else {
-        // @ts-ignore
-        res(evt.target.result);
-      }
-    };
-  });
+  return getDocs(collection(db, store)).then((snap) => snap.docs.map((d) => d.id));
 }
 
 export function saveAll(objects: Schema.Entity[]): Promise<void[]> {
@@ -544,6 +549,17 @@ export function getRealtimeSession(id: DBID) {
 }
 export function getTimedNote(id: DBID) {
   return getEntry("TimedNote", id) as Promise<Schema.TimedNote>;
+}
+
+export async function getAllDesignModelIds(uid: string): Promise<DBID[]> {
+  const [wellKnownSnap, ownedSnap] = await Promise.all([
+    getDocs(query(collection(db, "DesignModel"), where("wellKnown", "==", true))),
+    getDocs(query(collection(db, "DesignModel"), where("ownerUid", "==", uid))),
+  ]);
+  const ids = new Set<string>();
+  wellKnownSnap.docs.forEach((d) => ids.add(d.id));
+  ownedSnap.docs.forEach((d) => ids.add(d.id));
+  return Array.from(ids);
 }
 
 export async function getProjectOrFail(

@@ -3,7 +3,8 @@
   SPDX-License-Identifier: BSD-3-Clause
 -->
 <script lang="ts">
-  import { getDesignModel, getAll, newDesignModel } from "../../data/database";
+  import { getDesignModel, getAllDesignModelIds, newDesignModel } from "../../data/database";
+  import { getUid } from "../../data/authState.svelte";
   import add from "@iconify-icons/ic/baseline-add";
 
   import type { DesignModel } from "../../data/schema";
@@ -21,9 +22,12 @@
 
   let allDesignModelsPromise: Promise<DesignModel[]>;
   function refreshSets() {
-    allDesignModelsPromise = getAll("DesignModel").then((ids) =>
-      Promise.all(ids.map(getDesignModel))
-    );
+    const uid = getUid();
+    if (uid) {
+      allDesignModelsPromise = getAllDesignModelIds(uid).then((ids) =>
+        Promise.all(ids.map(getDesignModel))
+      );
+    }
   }
   refreshSets();
 

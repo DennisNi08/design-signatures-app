@@ -20,13 +20,16 @@
   import { pushRecentProject } from "../data/recentProjects";
   import type { DesignModel } from "../data/schema";
   import { delay } from "../util/delay";
+  import {getUid} from "../data/authState.svelte";
+  import {db} from "../data/firebase";
+  import {doc, setDoc, serverTimestamp} from "firebase/firestore";
 
   let name = "";
   let description = "";
   let reportingPeriod: "day" | "week" | null = null;
   let periodAlignment: number = 0;
 
-  let designModel: DesignModel;
+  let designModel: DesignModel | null = null;
   let isCreating = false;
 
   export let params: { wild: string };
@@ -73,7 +76,12 @@
     const proj = newAsyncProject();
     proj.name = name;
     proj.description = description;
-    proj.designModel = designModel;
+    proj.ownerUid = getUid() ?? "";
+
+    if (designModel) {
+      proj.designModel = designModel;
+    }
+
     proj.created = new Date();
     proj.modified = new Date();
     proj.notes = [];
@@ -84,6 +92,16 @@
     proj.periodAlignment = periodAlignment;
     proj.active = true;
     await proj.save();
+    const uid = getUid();
+    if (uid) {
+      await setDoc(doc(db, "projectMembers", `${uid}_${proj.id}`), {
+        projectId: proj.id,
+        uid,
+        role: "owner",
+        status: "active",
+        joinedAt: serverTimestamp(),
+      });
+    }
     const id = proj.id;
     pushRecentProject(id);
     await pop();
@@ -126,13 +144,15 @@
     <BottomActionBar
       label="Create project"
       on:click={go}
-      disabled={!canContinue}
+      disabled={!canContinue || isCreating}
     />
   {:else}
+  {#if designModel}
     <BuilderFrame
       bind:designModel
       showModal={params.wild === BUILDER_MODAL_SUFFIX}
     />
+    {/if}
   {/if}
 </main>
 

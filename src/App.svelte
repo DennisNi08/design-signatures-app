@@ -33,9 +33,24 @@
   import Login from "./routes/Login.svelte"
   import { isLoading, getUser } from "./data/authState.svelte";
   import { onMount } from "svelte";
+  let presetsCreated = false;
 
   awaitObjectUpgradeIfNeeded();
-  createPresets(); // noop, but keeps the linter happy :)
+  $effect(() => {
+  if (isLoading()) return;
+  const onLoginPage = currentHash.startsWith("#/login");
+
+  if (!getUser() && !onLoginPage) {
+    push("/login");
+  } else if (getUser() && onLoginPage) {
+    push("/");
+  }
+
+  if (getUser() && !presetsCreated) {
+    presetsCreated = true;
+    createPresets();
+  }
+});
 
   let currentHash = $state(window.location.hash);
 
@@ -100,18 +115,6 @@
 
     "*": NotFound, // Not found
   };
-
-  $effect(() => {
-    if (isLoading())return;
-
-    const onLoginPage = currentHash.startsWith("#/login");;
-
-    if (!getUser() && !onLoginPage) {
-      push("/login");
-    } else if (getUser() && onLoginPage) {
-      push("/");
-    }
-  });
 </script>
 {#if isLoading()}
   <p>Loading...</p>

@@ -81,7 +81,9 @@ type Prepare<I> = Omit<DeepReadonly<DeepRequired<I>>, "id">;
 
 export interface AsyncEntry
   extends Entity<EmptyMeta>,
-    Prepare<DataType.AsyncEntry> {}
+    Prepare<DataType.AsyncEntry> {
+  projectId: string;
+    }
 
 const AsyncEntrySchema = makeSchema<AsyncEntry>({
   created: [null, currentDate],
@@ -89,6 +91,7 @@ const AsyncEntrySchema = makeSchema<AsyncEntry>({
   modified: [null, currentDate],
   note: [null, ""],
   period: [null, currentDate],
+  projectId: [null, ""],
 });
 
 interface ProjectMeta {
@@ -107,7 +110,9 @@ export interface AsyncProject
         ["entries", readonly AsyncEntry[]],
         ["notes", readonly ProjectNote[]]
       ]
-    > {}
+    > {
+      ownerUid: string;
+    }
 
 const AsyncProjectSchema = makeSchema<AsyncProject>({
   active: [null, true],
@@ -120,17 +125,21 @@ const AsyncProjectSchema = makeSchema<AsyncProject>({
   notes: ["ProjectNote", true],
   periodAlignment: [null, 0],
   reportingPeriod: [null, "day"],
+  ownerUid: [null, ""],
 });
 
 export interface DesignModel
   extends Entity<EmptyMeta>,
-    Prepare<DataType.DesignModel> {}
+    Prepare<DataType.DesignModel> {
+      ownerUid: string;
+    }
 
 const DesignModelSchema = makeSchema<DesignModel>({
   activities: [null, emptyArr],
   description: [null, null],
   name: [null, ""],
   wellKnown: [null, false],
+  ownerUid: [null, ""],
 });
 
 export interface ProjectNote

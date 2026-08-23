@@ -19,6 +19,7 @@
   import colorPresets from "../../data/colorPresets";
   import { newDesignModel } from "../../data/database";
   import { pop, push, router } from "svelte-spa-router";
+  import { getUid } from "../../data/authState.svelte";
 
   export let designModel: DesignModel;
   export let showModal: boolean;
@@ -92,6 +93,7 @@
       name,
     }));
     as.wellKnown = false;
+    as.ownerUid = getUid() ?? "";
     saving = true;
     await as.save();
     designModel = as;

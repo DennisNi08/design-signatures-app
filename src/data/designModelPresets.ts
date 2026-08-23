@@ -5,7 +5,7 @@
 
 import type { DesignModel } from "design-awareness-data-types";
 import type { DeepRequired } from "../types/utility";
-import { getDesignModel, newDesignModel } from "./database";
+import { newDesignModel } from "./database";
 import { WELL_KNOWN_ENTITY_PREFIX } from "./schema";
 
 export const presetDesignModels = [
@@ -261,8 +261,6 @@ export const presetDesignModels = [
 export function createPresets(): Promise<void[]> {
   return Promise.all(
     presetDesignModels.map(async ([id, { name, activities, description }]) => {
-      const existingSet = await getDesignModel(WELL_KNOWN_ENTITY_PREFIX + id);
-      if (existingSet === null) {
         const designModel = newDesignModel();
         designModel.name = name;
         designModel.description = description;
@@ -271,7 +269,6 @@ export function createPresets(): Promise<void[]> {
         await (designModel.save as (id: string) => Promise<void>)(
           WELL_KNOWN_ENTITY_PREFIX + id
         );
-      }
     })
   );
 }
