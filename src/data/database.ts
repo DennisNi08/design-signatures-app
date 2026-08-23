@@ -10,6 +10,7 @@ import { initializeConfiguration, upgradeDatabase } from "./upgradeDatabase";
 import {
   doc, setDoc, deleteDoc, getDoc, collection, getDocs, where, query} from "firebase/firestore";
 import { db } from "./firebase";
+import {Timestamp} from "firebase/firestore";
 
 const DB_NAME = "design-awareness-local-store";
 const META_KEY = "@meta";
@@ -171,9 +172,29 @@ async function remove(store: ObjectStoreName, id: DBID) {
   await deleteDoc(doc(db, store, id));
 }
 
+
+
 /**
  * Resolves to the stored data for the given id from the given datastore.
  */
+function convertTimestamps(obj: any): any {
+  if (obj === null || typeof obj !== "object") {
+    return obj;
+  }
+  if (obj instanceof Timestamp) {
+    return obj.toDate();
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(convertTimestamps);
+  }
+  const result: Record<string,any> = {};
+  for (const key in obj) {
+    result[key] = convertTimestamps(obj[key]);
+  }
+  return result;
+}
+
+
 async function get(store: ObjectStoreName, id: DBID): Promise<object | null> {
   if (store === "_Config") {
     const idb = await getDb();
@@ -187,7 +208,7 @@ async function get(store: ObjectStoreName, id: DBID): Promise<object | null> {
     )["target"]["result"];
   }
   const snap = await getDoc(doc(db, store, id));
-  return snap.exists() ? snap.data() : null;
+  return snap.exists() ? convertTimestamps(snap.data()) : null;
 }
 
 export const rawDatabaseOperations = {
@@ -562,6 +583,22 @@ export async function getAllDesignModelIds(uid: string): Promise<DBID[]> {
   return Array.from(ids);
 }
 
+export async function getUserProjectsRefs(uid: string): Promise<{projectId: string, type: "AsyncProject" | "RealtimeProject"}[]> {
+  const memberSnap = await getDocs(
+    query(collection(db, "projectMembers"), where("uid", "==", uid))
+  );
+  return memberSnap.docs.map((d) => ({
+    projectId: d.data().projectId as string,
+    type: "AsyncProject" as const
+  }));
+}
+
+export async function getUserProjectsIds(uid: string): Promise<string[]> {
+  const memberSnap = await getDocs(
+    query(collection(db, "projectMembers"), where("uid", "==", uid), where("status", '==', 'active'))
+  );
+  return memberSnap.docs.map((d) => d.data().projectId as string);
+}
 export async function getProjectOrFail(
   id: DBID
 ): Promise<

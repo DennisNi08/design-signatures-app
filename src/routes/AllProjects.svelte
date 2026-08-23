@@ -10,24 +10,19 @@
   import SplashScreen from "../components/SplashScreen.svelte";
   import Header from "../components/type/Header.svelte";
   import {
-    getAll,
-    getAsyncProject,
-    getRealtimeProject,
+    getUserProjectsIds, getProjectOrFail
   } from "../data/database";
+  import { getUid } from "../data/authState.svelte";
   import { sortBy } from "../util/sort";
 
   let projectPromise = (async function () {
-    let realtimeProjects = getAll("RealtimeProject").then((ids) =>
-      Promise.all(ids.map((id) => getRealtimeProject(id)))
-    );
-    let asyncProjects = getAll("AsyncProject").then((ids) =>
-      Promise.all(ids.map((id) => getAsyncProject(id)))
-    );
+    const uid = getUid();
+    if (!uid) { return []; }
+    const ids = await getUserProjectsIds(uid);
+    const results = await Promise.all(ids.map(id => getProjectOrFail(id).catch(() => null)));
+    const unsortedProjects = results.filter((r) => r !== null).map(([,project]) => project);
 
-    let unsortedProjects = (
-      await Promise.all([realtimeProjects, asyncProjects])
-    ).flat();
-    return sortBy("modified", unsortedProjects, false);
+    return sortBy("modified", unsortedProjects,false);
   })();
 </script>
 
