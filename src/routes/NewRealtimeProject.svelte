@@ -4,6 +4,9 @@
 -->
 <script lang="ts">
   import { pop, push, replace, router } from "svelte-spa-router";
+  import {doc, setDoc, serverTimestamp} from "firebase/firestore";
+  import {db} from "../data/firebase";
+  import {getUid} from "../data/authState.svelte";
   import BackButton from "../components/BackButton.svelte";
   import BottomActionBar from "../components/BottomActionBar.svelte";
   import {
@@ -42,7 +45,20 @@
     proj.notes = [];
     proj.sessions = [];
     proj.active = true;
+    proj.ownerUid = getUid() ?? "";
     await proj.save();
+
+    const uid = getUid();
+    if (uid) {
+      await setDoc(doc(db, "projectMembers", `${uid}_${proj.id}`), {
+        projectId: proj.id,
+        uid,
+        role: "owner",
+        status: "active",
+        joinedAt: serverTimestamp(),
+      });
+    }
+
     const id = proj.id;
     pushRecentProject(id);
 

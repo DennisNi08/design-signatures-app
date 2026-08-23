@@ -162,7 +162,9 @@ export interface RealtimeProject
         ["notes", readonly ProjectNote[]],
         ["sessions", readonly RealtimeSession[]]
       ]
-    > {}
+    > {
+      ownerUid: string;
+    }
 
 const RealtimeProjectSchema = makeSchema<RealtimeProject>({
   active: [null, true],
@@ -173,6 +175,7 @@ const RealtimeProjectSchema = makeSchema<RealtimeProject>({
   name: [null, ""],
   notes: ["ProjectNote", true],
   sessions: ["RealtimeSession", true],
+  ownerUid: [null, ""],
 });
 
 export interface RealtimeSession
