@@ -15,13 +15,14 @@
     removeRecentProject,
   } from "../data/recentProjects";
   import type { AsyncProject, RealtimeProject } from "../data/schema";
-  import { hasOwnProperty } from "../types/utility";
+  import { isAsyncProject} from "../types/utility"
   import { createInvite, getSentInvites, revokeInvite, type ProjectInvite } from "../data/invites";
   import InputField from "./InputField.svelte";
   import Modal from "./Modal.svelte";
   import SegmentedSelector from "./SegmentedSelector.svelte";
   import type { PopupMenuDescriptor } from "./PopupMenu.svelte";
   import PopupMenu from "./PopupMenu.svelte";
+  import { removeProjectMemberships } from "../data/database";
 
   export let project: AsyncProject | RealtimeProject;
 
@@ -102,21 +103,22 @@
   }
 
   // delete
-  let active = true;
+  let active = true
   async function remove() {
-    active = false;
-    const toRemove = [];
-    toRemove.push(removeRecentProject(project.id));
-    project.notes.forEach((note) => toRemove.push(note.remove()));
-    if (hasOwnProperty(project, "entries")) {
-      project.entries.forEach((entry) => toRemove.push(entry.remove()));
-    } else {
-      project.sessions.forEach((session) => toRemove.push(session.remove()));
-    }
-    toRemove.push(project.remove());
-    await Promise.all(toRemove);
-    pop();
+  active = false;
+  const toRemove = [];
+  toRemove.push(removeRecentProject(project.id));
+  toRemove.push(removeProjectMemberships(project.id));
+  project.notes.forEach((note) => toRemove.push(note.remove()));
+  if (isAsyncProject(project)) {
+    project.entries.forEach((entry) => toRemove.push(entry.remove()));
+  } else {
+    project.sessions.forEach((session) => toRemove.push(session.remove()));
   }
+  toRemove.push(project.remove());
+  await Promise.all(toRemove);
+  pop();
+}
 
   // invite
   let inviteEmail = "";

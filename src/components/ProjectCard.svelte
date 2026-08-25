@@ -5,9 +5,9 @@
 <script lang="ts">
   import { getProjectOrFail } from "../data/database";
   import type { AsyncProject, RealtimeProject } from "../data/schema";
-  import { hasOwnProperty } from "../types/utility";
   import CardDotGrid from "./CardDotGrid.svelte";
   import CardTimeline from "./CardTimeline.svelte";
+  import { isRealtimeProject, isAsyncProject } from "../types/utility";
 
   export let newProjectPlaceholder = false;
   export let loadingPlaceholder = false;
@@ -44,9 +44,9 @@
   {:else}
     <div class="card">
       {#if !loading && project}
-        {#if hasOwnProperty(project, "sessions") && project.sessions.length}
+        {#if isRealtimeProject(project) && project.sessions.length}
           <CardTimeline {project} />
-        {:else if hasOwnProperty(project, "entries")}
+        {:else if isAsyncProject(project)}
           <CardDotGrid {project} />
         {/if}
       {/if}

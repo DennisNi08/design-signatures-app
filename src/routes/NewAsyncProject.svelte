@@ -71,27 +71,25 @@
     designModel !== null &&
     !isCreating;
 
-  async function go() {
-    isCreating = true;
+async function go() {
+  isCreating = true;
+  try {
     const proj = newAsyncProject();
     proj.name = name;
     proj.description = description;
     proj.ownerUid = getUid() ?? "";
-
     if (designModel) {
       proj.designModel = designModel;
     }
-
     proj.created = new Date();
     proj.modified = new Date();
     proj.notes = [];
     proj.entries = [];
-    // this nullish fallback shouldn't be necessary, since reportingPeriod needs
-    // a choice before the button is enabled, but this keeps typescript happy!
     proj.reportingPeriod = reportingPeriod ?? "day";
     proj.periodAlignment = periodAlignment;
     proj.active = true;
     await proj.save();
+
     const uid = getUid();
     if (uid) {
       await setDoc(doc(db, "projectMembers", `${uid}_${proj.id}`), {
@@ -102,12 +100,18 @@
         joinedAt: serverTimestamp(),
       });
     }
+
     const id = proj.id;
     pushRecentProject(id);
     await pop();
     await delay(16);
     await replace(`/projects/${id}/`);
+  } catch (err) {
+    console.error("go() failed:", err);
+  } finally {
+    isCreating = false;
   }
+}
 </script>
 
 <main class="device-frame page">

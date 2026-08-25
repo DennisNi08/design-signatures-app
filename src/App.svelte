@@ -49,7 +49,9 @@
 
   if (getUser() && !presetsCreated) {
     presetsCreated = true;
-    createPresets();
+    createPresets().catch((err) => {
+      console.warn("createPresets failed", err)
+    });
   }
 });
 

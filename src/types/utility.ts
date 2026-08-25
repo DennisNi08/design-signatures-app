@@ -2,7 +2,7 @@
  * Copyright (c) 2021, Design Awareness Contributors.
  * SPDX-License-Identifier: BSD-3-Clause
  */
-
+import type {AsyncProject, RealtimeProject} from "../data/schema";
 /**
  * Recursively changes all tuples and arrays to readonly.
  */
@@ -105,4 +105,14 @@ export function hasOwnProperty<X extends {}, Y extends PropertyKey>(
   ? X & Record<Y, unknown>
   : Extract<X, Record<Y, unknown>> {
   return obj.hasOwnProperty(prop);
+}
+export function isAsyncProject(
+  p: RealtimeProject | AsyncProject
+): p is AsyncProject {
+  return "entries" in p;
+}
+export function isRealtimeProject(
+  p: RealtimeProject | AsyncProject
+): p is RealtimeProject {
+  return "sessions" in p;
 }

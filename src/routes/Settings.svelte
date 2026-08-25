@@ -25,66 +25,66 @@
     PULL_REQUEST,
     VERSION,
   } from "../data/buildData";
-  import {
-    getAll,
-    getAsyncProject,
-    getDesignModel,
-    getRealtimeProject,
-  } from "../data/database";
   import type { DesignModel } from "../data/schema";
-  import { WELL_KNOWN_ENTITY_PREFIX } from "../data/schema";
   import { openOnboarding } from "../util/onboard";
   import { pinchToZoomEnabled, textScalingFactor } from "../util/scaling";
+  import {
+  getAllWellKnownDesignModelIds,
+  getAllDesignModelIds,
+  getDesignModel,
+  getUserProjectsIds,
+  getProjectOrFail,
+} from "../data/database";
+  import { getUid } from "../data/authState.svelte";
 
   async function resetWellKnownModels() {
-    if (confirm("Are you sure? Built-in design models will be recreated.")) {
-      const designModels = await getAll("DesignModel");
-      await Promise.all(
-        designModels.map(async (id) => {
-          if (id.startsWith(WELL_KNOWN_ENTITY_PREFIX)) {
-            const model = await getDesignModel(id);
-            if (model) await model.remove();
-          }
-        })
-      );
-      alert("Reset complete.");
-      location.reload();
-    }
+  if (confirm("Are you sure? Built-in design models will be recreated.")) {
+    const ids = await getAllWellKnownDesignModelIds();
+    await Promise.all(
+      ids.map(async (id) => {
+        const model = await getDesignModel(id);
+        if (model) await model.remove();
+      })
+    );
+    alert("Reset complete.");
+    location.reload();
+  }
+}
+
+ async function deleteUnusedModels() {
+  const uid = getUid();
+  if (!uid) return;
+
+  const modelIds = await getAllDesignModelIds(uid);
+  const eligibleModels = new Set<DesignModel>(
+    await Promise.all(modelIds.map((id) => getDesignModel(id)))
+  );
+
+  const projectIds = await getUserProjectsIds(uid);
+  const projects = (
+    await Promise.all(projectIds.map((id) => getProjectOrFail(id).catch(() => null)))
+  ).filter((r) => r !== null);
+
+  projects.forEach(([, project]) => eligibleModels.delete(project.designModel));
+
+  const modelsToRemove = Array.from(eligibleModels.values()).filter((m) => !m.wellKnown);
+
+  if (!modelsToRemove.length) {
+    alert("No unused design models to delete.");
+    return;
   }
 
-  async function deleteUnusedModels() {
-    const eligibleModels = new Set<DesignModel>(
-      await getAll("DesignModel").then((ids) =>
-        Promise.all(ids.map((id) => getDesignModel(id)))
-      )
-    );
-    const projects = (
-      await Promise.all([
-        getAll("RealtimeProject").then((ids) =>
-          Promise.all(ids.map((id) => getRealtimeProject(id)))
-        ),
-        getAll("AsyncProject").then((ids) =>
-          Promise.all(ids.map((id) => getAsyncProject(id)))
-        ),
-      ])
-    ).flat();
-    projects.forEach(({ designModel }) => eligibleModels.delete(designModel));
-    const modelsToRemove = Array.from(eligibleModels.values());
-    if (!modelsToRemove.length) {
-      alert("No unused design models to delete.");
-    }
-    if (
-      confirm(
-        "The following unused design models will be deleted:\n" +
-          modelsToRemove.map((set) => " - " + set.name).join("\n") +
-          "\nBuilt-in design models will be restored."
-      )
-    ) {
-      await Promise.all(modelsToRemove.map((set) => set.remove()));
-      alert("Done.");
-      location.reload();
-    }
+  if (
+    confirm(
+      "The following unused design models will be deleted:\n" +
+        modelsToRemove.map((set) => " - " + set.name).join("\n")
+    )
+  ) {
+    await Promise.all(modelsToRemove.map((set) => set.remove()));
+    alert("Done.");
+    location.reload();
   }
+}
 
   async function update() {
     if (!navigator.onLine) {
@@ -117,7 +117,7 @@
     <p>
       <Button small on:click={handleSignOut}>Sign out</Button>
     </p>
-    
+
     {#if FEEDBACK_LINK}
       <SectionHeader>Feedback</SectionHeader>
       <a href={FEEDBACK_LINK} target="_blank">Send feedback about this app</a>

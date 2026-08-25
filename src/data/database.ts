@@ -14,7 +14,6 @@ import {Timestamp} from "firebase/firestore";
 
 const DB_NAME = "design-awareness-local-store";
 const META_KEY = "@meta";
-const DEBUG_DELAY = 0;
 
 type DBID = string;
 
@@ -209,7 +208,6 @@ async function get(store: ObjectStoreName, id: DBID): Promise<object | null> {
   }
   try {
     const snap = await getDoc(doc(db, store, id));
-    console.log(`get(${store}, ${id}) — exists:`, snap.exists());
     return snap.exists() ? convertTimestamps(snap.data()) : null;
   } catch (err) {
     console.error(`get(${store}, ${id}) — THREW:`, err);
@@ -272,10 +270,6 @@ export function getAll(store: Schema.EntityName): Promise<DBID[]> {
   return getDocs(collection(db, store)).then((snap) => snap.docs.map((d) => d.id));
 }
 
-export function saveAll(objects: Schema.Entity[]): Promise<void[]> {
-  return Promise.all(objects.map((object) => object.save()));
-}
-
 /**
  * Resolves to the entry with the given id in the given datastore.
  * If there is no entry for the given id, resolves to null.
@@ -294,6 +288,9 @@ export function saveAll(objects: Schema.Entity[]): Promise<void[]> {
  * (Type checking is no longer enforced at runtime, so using the interfaces
  * will help you ensure type correctness when setting properties.)
  */
+
+//8/25/26 Fixed function to make sure that even if a get function fails in child objects, the projects will still load
+//Fixes bug where show all projects screen would not load if a child object was missing or deleted, leading to infinite buffer
 async function getEntry(
   store: Schema.EntityName,
   id: DBID
@@ -311,10 +308,9 @@ async function getEntry(
       resolveStore.set(id, promise);
 
       // lookup entry from db;
+      try{
       const obj = (await get(store, id)) as Schema.Entity;
       if (!obj) {
-        resolveStore.delete(id);
-        resolver();
         return null;
       }
 
@@ -326,13 +322,14 @@ async function getEntry(
 
       // no cyclic objects, or we'll never resolve!
       await childResolutionPromise;
-
       // resolve complete
-      resolveStore.delete(id);
       typeStore.set(id, clientObj);
+    }finally {
+      resolveStore.delete(id);
       resolver();
     }
   }
+}
   return typeStore.get(id) ?? null;
 }
 
@@ -589,16 +586,6 @@ export async function getAllDesignModelIds(uid: string): Promise<DBID[]> {
   return Array.from(ids);
 }
 
-export async function getUserProjectsRefs(uid: string): Promise<{projectId: string, type: "AsyncProject" | "RealtimeProject"}[]> {
-  const memberSnap = await getDocs(
-    query(collection(db, "projectMembers"), where("uid", "==", uid))
-  );
-  return memberSnap.docs.map((d) => ({
-    projectId: d.data().projectId as string,
-    type: "AsyncProject" as const
-  }));
-}
-
 export async function getUserProjectsIds(uid: string): Promise<string[]> {
   const memberSnap = await getDocs(
     query(collection(db, "projectMembers"), where("uid", "==", uid), where("status", '==', 'active'))
@@ -622,15 +609,6 @@ export async function getProjectOrFail(
   if (asyncProject) return ["AsyncProject", asyncProject as Schema.AsyncProject];
   if (realtimeProject) return ["RealtimeProject", realtimeProject as Schema.RealtimeProject];
   throw new Error("No project found.");
-}
-
-export function getEntityOrFail<T>(promise: Promise<T>): Promise<T> {
-  return new Promise((res, rej) =>
-    promise.then((object) => {
-      if (object !== null) res(object);
-      rej(null);
-    })
-  );
 }
 
 function newEntity(type: Schema.EntityName) {
@@ -678,6 +656,21 @@ export function deleteDB(): Promise<Event> {
     req.onsuccess = res;
     req.onerror = rej;
   });
+}
+
+//removes entries from projectMember database once a project has been deleted
+export async function removeProjectMemberships(projectId:string): Promise<void>{
+  const snap = await getDocs(
+    query(collection(db,"projectMembers"), where("projectId", "==", projectId))
+  );
+  await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+}
+
+export async function getAllWellKnownDesignModelIds(): Promise<DBID[]> {
+  const snap = await getDocs(
+    query(collection(db, "DesignModel"), where("wellKnown", "==", true))
+  );
+  return snap.docs.map((d) => d.id);
 }
 
 /**

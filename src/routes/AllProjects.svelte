@@ -20,7 +20,6 @@
   if (!uid) return [];
 
   const ids = await getUserProjectsIds(uid);
-  console.log("getUserProjectsIds returned:", ids);
 
   const results = await Promise.all(
     ids.map((id) =>

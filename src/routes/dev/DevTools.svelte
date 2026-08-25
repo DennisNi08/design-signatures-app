@@ -11,15 +11,14 @@
   import CONFIG from "../../data/config";
   import {
     deleteDB,
-    getAll,
-    getAsyncEntry,
-    getAsyncProject,
+    getAllDesignModelIds,
     getDesignModel,
-    getProjectNote,
-    getRealtimeProject,
-    getRealtimeSession,
-    getTimedNote,
+    getUserProjectsIds,
+    getProjectOrFail,
+    removeProjectMemberships,
   } from "../../data/database";
+  import { getUid } from "../../data/authState.svelte";
+  import { isAsyncProject, isRealtimeProject } from "../../types/utility";
   import { colorScheme } from "../../util/colorScheme";
   import { canInstall, isInstalled } from "../../util/pwa";
 
@@ -33,86 +32,71 @@
       await CONFIG.getDevShowCanvasTimelineOnProjectPage();
   })();
 
+  // Note: this only clears data belonging to the currently signed-in user
+  // (their own projects, memberships, and non-wellKnown design models).
   async function deleteAll() {
+    const uid = getUid();
+    if (!uid) return;
+
     if (
-      confirm("Are you absolutely sure? All database entities will be deleted.")
+      confirm(
+        "Are you absolutely sure? All your projects and design models will be deleted."
+      )
     ) {
-      const [
-        asyncEntries,
-        asyncProjects,
-        designModels,
-        projectNotes,
-        realtimeProjects,
-        realtimeSessions,
-        timedNotes,
-      ] = await Promise.all([
-        getAll("AsyncEntry"),
-        getAll("AsyncProject"),
-        getAll("DesignModel"),
-        getAll("ProjectNote"),
-        getAll("RealtimeProject"),
-        getAll("RealtimeSession"),
-        getAll("TimedNote"),
+      const [modelIds, projectIds] = await Promise.all([
+        getAllDesignModelIds(uid),
+        getUserProjectsIds(uid),
       ]);
+
+      const projects = (
+        await Promise.all(
+          projectIds.map((id) => getProjectOrFail(id).catch(() => null))
+        )
+      ).filter((r) => r !== null);
+
       await Promise.all([
         CONFIG.setRecentProjects([]),
-        Promise.all(
-          asyncEntries.map(async (id) => {
-            const designModel = await getAsyncEntry(id);
-            if (designModel) await designModel.remove();
-          })
-        ),
-        Promise.all(
-          asyncProjects.map(async (id) => {
-            const asyncProject = await getAsyncProject(id);
-            if (asyncProject) await asyncProject.remove();
-          })
-        ),
-        Promise.all(
-          designModels.map(async (id) => {
-            const designModel = await getDesignModel(id);
-            if (designModel) await designModel.remove();
-          })
-        ),
-        Promise.all(
-          projectNotes.map(async (id) => {
-            const projectNote = await getProjectNote(id);
-            if (projectNote) await projectNote.remove();
-          })
-        ),
-        Promise.all(
-          realtimeProjects.map(async (id) => {
-            const realtimeProject = await getRealtimeProject(id);
-            if (realtimeProject) await realtimeProject.remove();
-          })
-        ),
-        Promise.all(
-          realtimeSessions.map(async (id) => {
-            const realtimeSession = await getRealtimeSession(id);
-            if (realtimeSession) await realtimeSession.remove();
-          })
-        ),
-        Promise.all(
-          timedNotes.map(async (id) => {
-            const timedNote = await getTimedNote(id);
-            if (timedNote) await timedNote.remove();
-          })
-        ),
+        ...projects.map(async ([, project]) => {
+          await removeProjectMemberships(project.id);
+          if (project.notes) {
+            await Promise.all(project.notes.map((note) => note.remove()));
+          }
+          if (isAsyncProject(project)) {
+            await Promise.all(project.entries.map((entry) => entry.remove()));
+          } else if (isRealtimeProject(project)) {
+            await Promise.all(
+              project.sessions.map((session) => session.remove())
+            );
+          }
+          await project.remove();
+        }),
+        ...modelIds.map(async (id) => {
+          const model = await getDesignModel(id);
+          if (model && !model.wellKnown && model.ownerUid === uid) {
+            await model.remove();
+          }
+        }),
       ]);
-      alert("Database cleared successfully.");
+
+      alert("Your data has been cleared.");
       location.reload();
     }
   }
 
+  // Wipes only the local IndexedDB store used for on-device settings
+  // (the "_Config" store). Does not touch any Firestore data, since
+  // project/model/entry data now lives in Firestore, not locally.
   async function deleteDb() {
     if (
-      confirm("Are you absolutely sure? The entire database will be deleted.")
+      confirm(
+        "Are you absolutely sure? Your local device settings will be reset. This does not affect any of your projects or design models, which are stored in the cloud."
+      )
     ) {
       try {
         await deleteDB();
-        alert("Database deleted successfully.");
+        alert("Local settings reset successfully.");
       } catch (e) {
-        alert("An error occurred while deleting the database.");
+        alert("An error occurred while resetting local settings.");
       }
       location.reload();
     }
@@ -169,11 +153,11 @@
 
   <Header>Danger Zone</Header>
   <p>
-    Remove all entries from the database:
+    Remove all of your projects and design models:
     <button on:click={deleteAll}>purge</button>
   </p>
   <p>
-    Delete the database itself (including configuration):
+    Reset local device settings:
     <button on:click={deleteDb}>delete</button>
   </p>
 </ContentFrame>
