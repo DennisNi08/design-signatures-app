@@ -207,8 +207,14 @@ async function get(store: ObjectStoreName, id: DBID): Promise<object | null> {
       })) as any
     )["target"]["result"];
   }
-  const snap = await getDoc(doc(db, store, id));
-  return snap.exists() ? convertTimestamps(snap.data()) : null;
+  try {
+    const snap = await getDoc(doc(db, store, id));
+    console.log(`get(${store}, ${id}) — exists:`, snap.exists());
+    return snap.exists() ? convertTimestamps(snap.data()) : null;
+  } catch (err) {
+    console.error(`get(${store}, ${id}) — THREW:`, err);
+    throw err;
+  }
 }
 
 export const rawDatabaseOperations = {
@@ -605,16 +611,16 @@ export async function getProjectOrFail(
   | ["AsyncProject", Schema.AsyncProject]
   | ["RealtimeProject", Schema.RealtimeProject]
 > {
-  let projects = (await Promise.all([
+  const [asyncResult, realtimeResult] = await Promise.allSettled([
     getEntry("AsyncProject", id),
     getEntry("RealtimeProject", id),
-  ])) as [Schema.AsyncProject | null, Schema.RealtimeProject | null];
-  if (projects[0]) {
-    return ["AsyncProject", projects[0]];
-  }
-  if (projects[1]) {
-    return ["RealtimeProject", projects[1]];
-  }
+  ]);
+
+  const asyncProject = asyncResult.status === "fulfilled" ? asyncResult.value : null;
+  const realtimeProject = realtimeResult.status === "fulfilled" ? realtimeResult.value : null;
+
+  if (asyncProject) return ["AsyncProject", asyncProject as Schema.AsyncProject];
+  if (realtimeProject) return ["RealtimeProject", realtimeProject as Schema.RealtimeProject];
   throw new Error("No project found.");
 }
 

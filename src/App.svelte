@@ -33,6 +33,7 @@
   import Login from "./routes/Login.svelte"
   import { isLoading, getUser } from "./data/authState.svelte";
   import { onMount } from "svelte";
+  import Invites from "./routes/Invites.svelte";
   let presetsCreated = false;
 
   awaitObjectUpgradeIfNeeded();
@@ -67,6 +68,7 @@
   const routes: RouteDefinition = {
     "/": Home, // Home
     "/login": Login, //Login Page,
+    "/invites": Invites, // Invites
 
     "/new/realtime/*": NewRealtimeProject,
     "/new/realtime": RedirectAddPath,

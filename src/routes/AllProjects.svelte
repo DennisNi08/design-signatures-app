@@ -16,14 +16,26 @@
   import { sortBy } from "../util/sort";
 
   let projectPromise = (async function () {
-    const uid = getUid();
-    if (!uid) { return []; }
-    const ids = await getUserProjectsIds(uid);
-    const results = await Promise.all(ids.map(id => getProjectOrFail(id).catch(() => null)));
-    const unsortedProjects = results.filter((r) => r !== null).map(([,project]) => project);
+  const uid = getUid();
+  if (!uid) return [];
 
-    return sortBy("modified", unsortedProjects,false);
-  })();
+  const ids = await getUserProjectsIds(uid);
+  console.log("getUserProjectsIds returned:", ids);
+
+  const results = await Promise.all(
+    ids.map((id) =>
+      getProjectOrFail(id).catch((err) => {
+        console.error("Failed to load project", id, err);
+        return null;
+      })
+    )
+  );
+  const unsortedProjects = results
+    .filter((r) => r !== null)
+    .map(([, project]) => project);
+
+  return sortBy("modified", unsortedProjects, false);
+})();
 </script>
 
 {#await projectPromise}
