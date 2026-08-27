@@ -12,7 +12,6 @@
   import PageHeader from "../components/PageHeader.svelte";
   import ProjectCard from "../components/ProjectCard.svelte";
   import Header from "../components/type/Header.svelte";
-  import { getRecentProjects } from "../data/recentProjects";
   import { canInstall, isInstalled, showInstallPrompt } from "../util/pwa";
   import { getPendingInviteCount } from "../data/inviteNotifications.svelte";
   import { getRecentUserProjects } from "../data/database"
