@@ -15,6 +15,8 @@
   import { getRecentProjects } from "../data/recentProjects";
   import { canInstall, isInstalled, showInstallPrompt } from "../util/pwa";
   import { getPendingInviteCount } from "../data/inviteNotifications.svelte";
+  import { getRecentUserProjects } from "../data/database"
+  import { getUid } from "../data/authState.svelte"
 
   async function install() {
     if ($canInstall && (await showInstallPrompt())) {
@@ -43,7 +45,7 @@
             <ProjectCard newProjectPlaceholder />
           </a>
         </li>
-        {#await getRecentProjects()}
+        {#await (getUid() ? getRecentUserProjects(getUid()!) : Promise.resolve([]))}
           <li>
             <ProjectCard loadingPlaceholder />
           </li>

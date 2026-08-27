@@ -673,6 +673,16 @@ export async function getAllWellKnownDesignModelIds(): Promise<DBID[]> {
   return snap.docs.map((d) => d.id);
 }
 
+export async function getRecentUserProjects(uid:string, limitCount = 8) {
+  const ids = await getUserProjectsIds(uid);
+  const results = await Promise.all(
+    ids.map((id) => getProjectOrFail(id).catch(() => null))
+  );
+  const projects = results.filter((r) => r!==null);
+  projects.sort((a,b) => b[1].modified.getTime() - a[1].modified.getTime());
+  return projects.slice(0,limitCount).map(([,project]) => project.id);
+}
+
 /**
  * Returns a unique* 24 character alphanumeric id.
  * The first 16 characters are random, and the last 8
