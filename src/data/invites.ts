@@ -2,15 +2,23 @@ import{ doc, setDoc, updateDoc, deleteDoc, getDocs, collection, query, where, se
 import { db } from "./firebase";
 import { getUid } from "./authState.svelte";
 import {auth} from "./firebase";
+import { getProjectOrFail} from "./database"
 
 //structures for ProjectInvite
 export interface ProjectInvite {
   id: string;
   projectId: string;
+  projectName: string;
   email: string;
   role: "editor" | "viewer";
   invitedByUid: string;
+  invitedByName: string;
+  invitedByEmail: string;
   status: "pending" | "accepted" | "declined";
+}
+
+export interface ProjectInviteWithProject extends ProjectInvite {
+  projectName: string;
 }
 
 //Generates the unique ID for an invite based on the project ID and the email of the invitee. This ensures that each invite is unique and can be easily retrieved or managed in the database.
@@ -23,11 +31,16 @@ export async function createInvite(projectId: string, email: string, role: "edit
   const uid = getUid();
   if (!uid) throw new Error("User not authenticated");
 
+  const currentUser = auth.currentUser
+  const[,project] = await getProjectOrFail(projectId)
   await setDoc(doc(db, "projectInvites", inviteId(projectId, email)), {
     projectId,
-    email,
+    projectName:project.name,
+    email: email.toLowerCase(),
     role,
     invitedByUid: uid,
+    invitedByName: currentUser?.displayName ?? "",
+    invitedByEmail: currentUser?.email ?? "",
     status: "pending",
     createdAt: serverTimestamp(),
   });
@@ -46,7 +59,7 @@ export async function getSentInvites(projectId: string): Promise<ProjectInvite[]
 }
 
 //Generates a list of pending invites for the currently authenticated user. It queries the "projectInvites" collection in Firestore, filtering by the user's email and the "pending" status. The function returns an array of ProjectInvite objects representing the pending invites.
-export async function getMyPendingInvites(): Promise<ProjectInvite[]> {
+export async function getMyPendingInvites(): Promise<ProjectInviteWithProject[]> {
   const email = auth.currentUser?.email;
   if (!email) return [];
 
@@ -57,7 +70,7 @@ export async function getMyPendingInvites(): Promise<ProjectInvite[]> {
       where("status", "==", "pending")
     )
   );
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProjectInvite));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data()} as ProjectInviteWithProject));
 }
 
 //Accepts an invite for the currently authenticated user. It adds the user as a member of the project in the "projectMembers" collection and updates the status of the invite to "accepted" in the "projectInvites" collection.

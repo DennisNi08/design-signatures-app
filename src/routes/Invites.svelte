@@ -36,14 +36,22 @@
       {:else}
         <ul>
           {#each invites as invite}
-            <li>
-              <p>Invited as <strong>{invite.role}</strong></p>
+            <li class="invite-card">
+            <div class="invite-info">
+              <p class="project-name">{invite.projectName}</p>
+              <p class="invited-by">
+                Invited by {invite.invitedByName || invite.invitedByEmail}
+              </p>
+              <p class="role">Role: {invite.role}</p>
+            </div>
+            <div class="invite-actions">
               <Button small on:click={() => handleAccept(invite)} disabled={busyId === invite.id}>
                 Accept
               </Button>
               <Button small on:click={() => handleDecline(invite)} disabled={busyId === invite.id}>
                 Decline
               </Button>
+              </div>
             </li>
           {/each}
         </ul>
@@ -63,7 +71,39 @@
     margin: 0;
     padding: 0;
   }
-  li {
-    margin-bottom: 1rem;
+  .invite-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+    border-radius: 8px;
+    border: 1px solid $input-border-color;
+    background-color: $input-background-color;
+  }
+  .invite-info {
+    flex: 1;
+    min-width: 0;
+  }
+  .project-name {
+    margin: 0 0 0.15rem 0;
+    font-weight: 600;
+  }
+  .invited-by {
+    margin: 0 0 0.15rem 0;
+    font-size: 0.85rem;
+    color: $text-secondary-color;
+  }
+  .role {
+    margin: 0;
+    font-size: 0.8rem;
+    color: $text-secondary-color;
+    text-transform: capitalize;
+  }
+  .invite-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-shrink: 0;
   }
 </style>

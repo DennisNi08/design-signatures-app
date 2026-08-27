@@ -14,6 +14,7 @@
   import Header from "../components/type/Header.svelte";
   import { getRecentProjects } from "../data/recentProjects";
   import { canInstall, isInstalled, showInstallPrompt } from "../util/pwa";
+  import { getPendingInviteCount } from "../data/inviteNotifications.svelte";
 
   async function install() {
     if ($canInstall && (await showInstallPrompt())) {
@@ -62,6 +63,15 @@
       <Button on:click={async () => await push("/projects/")}>
         All projects
       </Button>
+
+      <div class="invite-button-wrap">
+        <Button on:click={async () => await push("/invites/")}>
+        Invitations
+        </Button>
+        {#if getPendingInviteCount() >0}
+        <span class = "badge">{getPendingInviteCount()}</span>
+        {/if}
+      </div>
 
       <Button on:click={async () => await push("/reflect/")} icon={reflectIcon}>
         Reflect
@@ -126,5 +136,25 @@
   .button-holder {
     display: flex;
     justify-content: space-between;
+  }
+  .invite-button-wrap {
+    position: relative;
+    display: inline-block;
+  }
+  .badge {
+    position: absolute;
+    top: -0.4rem;
+    right: -0.4rem;
+    min-width: 1.2rem;
+    height: 1.2rem;
+    padding: 0 0.3rem;
+    border-radius: 999px;
+    background-color: $accent-danger-color;
+    color: white;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 1.2rem;
+    text-align: center;
+    pointer-events: none;
   }
 </style>
