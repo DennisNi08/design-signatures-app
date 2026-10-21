@@ -7,7 +7,7 @@
   import notFoundIcon from "@iconify-icons/ic/baseline-search-off";
   import Link from "../components/Link.svelte";
   import SplashScreen from "../components/SplashScreen.svelte";
-  import { getProjectOrFail, invalidateProjectCache } from "../data/database";
+  import { getProjectOrFail, invalidateProjectCache, recoverOrphanedChildren } from "../data/database";
   import ProjectDetailAsync from "./ProjectDetailAsync.svelte";
   import ProjectDetailRealtime from "./ProjectDetailRealtime.svelte";
 
@@ -15,7 +15,10 @@
   // Bust the in-memory cache first so a fresh visit reflects any changes
   // other project members have saved since this tab last loaded it.
   invalidateProjectCache(params.id);
-  let promise = getProjectOrFail(params.id);
+  let promise = getProjectOrFail(params.id).then(async (result) => {
+    await recoverOrphanedChildren(result[1]);
+    return result;
+  });
 </script>
 
 {#await promise}

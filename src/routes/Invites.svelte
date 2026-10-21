@@ -7,19 +7,20 @@
 
   let invitesPromise = getMyPendingInvites();
   let busyId: string | null = null;
+  let actionError: string | null = null;
 
-  async function handleAccept(invite: ProjectInvite) {
+  async function respond(invite: ProjectInvite, action: (invite: ProjectInvite) => Promise<void>) {
     busyId = invite.id;
-    await acceptInvite(invite);
-    invitesPromise = getMyPendingInvites();
-    busyId = null;
-  }
-
-  async function handleDecline(invite: ProjectInvite) {
-    busyId = invite.id;
-    await declineInvite(invite);
-    invitesPromise = getMyPendingInvites();
-    busyId = null;
+    actionError = null;
+    try {
+      await action(invite);
+      invitesPromise = getMyPendingInvites();
+    } catch (err) {
+      console.error("Invite action failed", err);
+      actionError = "Something went wrong. Please try again.";
+    } finally {
+      busyId = null;
+    }
   }
 </script>
 
@@ -45,17 +46,22 @@
               <p class="role">Role: {invite.role}</p>
             </div>
             <div class="invite-actions">
-              <Button small on:click={() => handleAccept(invite)} disabled={busyId === invite.id}>
+              <Button small on:click={() => respond(invite, acceptInvite)} disabled={busyId === invite.id}>
                 Accept
               </Button>
-              <Button small on:click={() => handleDecline(invite)} disabled={busyId === invite.id}>
+              <Button small on:click={() => respond(invite, declineInvite)} disabled={busyId === invite.id}>
                 Decline
               </Button>
               </div>
             </li>
           {/each}
         </ul>
+        {#if actionError}
+          <p class="error">{actionError}</p>
+        {/if}
       {/if}
+    {:catch}
+      <p class="error">Couldn't load your invites. Please refresh to try again.</p>
     {/await}
   </ContentFrame>
   </main>
@@ -100,6 +106,9 @@
     font-size: 0.8rem;
     color: $text-secondary-color;
     text-transform: capitalize;
+  }
+  .error {
+    color: $accent-danger-color;
   }
   .invite-actions {
     display: flex;

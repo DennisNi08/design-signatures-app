@@ -102,6 +102,14 @@ match /RealtimeProject/{projectId} {
       ||
       invitedForRole(request.resource.data.projectId, request.resource.data.role)
     );
+  // Accepting an invite when a membership already exists (e.g. re-invited
+  // with a different role): same guarantee as create — you can only set your
+  // own membership to exactly the role a pending invite grants you.
+  allow update: if request.auth != null
+    && resource.data.uid == request.auth.uid
+    && request.resource.data.uid == request.auth.uid
+    && request.resource.data.projectId == resource.data.projectId
+    && invitedForRole(request.resource.data.projectId, request.resource.data.role);
   allow delete: if request.auth != null
     && (resource.data.uid == request.auth.uid
         || (isMember(resource.data.projectId) && memberRole(resource.data.projectId) == "owner"));

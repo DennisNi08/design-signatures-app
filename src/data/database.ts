@@ -8,7 +8,8 @@ import { VERSION } from "./buildData";
 import * as Schema from "./schema";
 import { initializeConfiguration, upgradeDatabase } from "./upgradeDatabase";
 import {
-  doc, setDoc, deleteDoc, getDoc, collection, getDocs, where, query} from "firebase/firestore";
+  doc, setDoc, deleteDoc, getDoc, collection, getDocs, where, query,
+  updateDoc, arrayUnion, arrayRemove} from "firebase/firestore";
 import { db } from "./firebase";
 import {Timestamp} from "firebase/firestore";
 
@@ -155,6 +156,35 @@ async function update(store: ObjectStoreName, data: any) {
     return;
   }
   await setDoc(doc(db, store, data.id), data);
+}
+
+/**
+ * Field-level update of an existing document. Unlike update(), fields not
+ * listed are left as-is, so concurrent edits by other members to *other*
+ * fields aren't overwritten with this client's stale copy. Adding to and
+ * removing from the same array needs two writes (Firestore allows one
+ * transform per field per write).
+ */
+async function patch(
+  store: ObjectStoreName,
+  id: DBID,
+  fields: Record<string, any>,
+  arrayAdds: Record<string, string[]>,
+  arrayRemoves: Record<string, string[]>
+) {
+  const ref = doc(db, store, id);
+  const first: Record<string, any> = { ...fields };
+  for (const [name, ids] of Object.entries(arrayRemoves)) {
+    if (ids.length) first[name] = arrayRemove(...ids);
+  }
+  const second: Record<string, any> = {};
+  for (const [name, ids] of Object.entries(arrayAdds)) {
+    if (!ids.length) continue;
+    if (name in first) second[name] = arrayUnion(...ids);
+    else first[name] = arrayUnion(...ids);
+  }
+  if (Object.keys(first).length) await updateDoc(ref, first);
+  if (Object.keys(second).length) await updateDoc(ref, second);
 }
 
 /**
@@ -359,6 +389,13 @@ function createClientObject(
   // ids of repeated children that exist but couldn't be read (e.g. a
   // permission or network error); kept so save() doesn't drop them
   const unreadableChildIds: Record<string, string[]> = {};
+  // what's been edited since the last save, so save() writes only those
+  // fields and doesn't overwrite other members' concurrent changes
+  const changedFields = new Set<string>();
+  let metaChanged = false;
+  // child ids the server is known to have, per repeated field; save() sends
+  // only additions/removals relative to this
+  const savedChildIds: Record<string, string[]> = {};
 
   // client obj private properties
   let dirty = !_id;
@@ -368,7 +405,15 @@ function createClientObject(
 
   for (let [name, dbtype, repeated] of schema) {
     if (dbtype == null) {
-      data[name] = rawObj[name];
+      // docs written before a field was added to the schema lack it;
+      // fall back to the schema default rather than carrying `undefined`
+      const fallback = repeated as unknown;
+      data[name] =
+        rawObj[name] !== undefined
+          ? rawObj[name]
+          : typeof fallback === "function"
+          ? fallback()
+          : fallback;
     } else {
       let modelName = dbtype;
       // children need resolving!!
@@ -385,6 +430,7 @@ function createClientObject(
         }
       } else {
         const childIDs: string[] = Array.isArray(rawObj[name]) ? rawObj[name] : [];
+        if (_id) savedChildIds[name] = [...childIDs];
         if (childIDs.length) {
           childResolvers.push(
             (async () => {
@@ -420,6 +466,7 @@ function createClientObject(
         if (v !== data[name]) {
           data[name] = v;
           dirty = true;
+          changedFields.add(name);
         }
       },
     });
@@ -480,18 +527,48 @@ function createClientObject(
         dbObj[META_KEY] = meta;
 
         dirty = false;
+        const savingFields = new Set(changedFields);
+        changedFields.clear();
+        const savingMeta = metaChanged;
+        metaChanged = false;
+        // children start saving right away; observe their result now so a
+        // failure isn't an unhandled rejection if our own write fails first
+        const childrenSaved = Promise.all(savingChildren);
+        childrenSaved.catch(() => {});
 
         try {
           if (isNewEntry) {
             await add(store, dbObj);
           } else {
-            await update(store, dbObj);
+            // Write only what this client changed, and express child-list
+            // changes as atomic adds/removes, so two members editing the
+            // same project at once don't erase each other's work.
+            const fields: Record<string, any> = {};
+            const adds: Record<string, string[]> = {};
+            const removes: Record<string, string[]> = {};
+            for (const [name, dbtype, repeated] of schema) {
+              if (dbtype !== null && repeated) {
+                const current: string[] = dbObj[name];
+                const previous = savedChildIds[name] ?? [];
+                adds[name] = current.filter((childId) => !previous.includes(childId));
+                removes[name] = previous.filter((childId) => !current.includes(childId));
+              } else if (savingFields.has(name)) {
+                fields[name] = dbObj[name];
+              }
+            }
+            if (savingMeta) fields[META_KEY] = meta;
+            await patch(store, id!, fields, adds, removes);
+          }
+          for (const [name, dbtype, repeated] of schema) {
+            if (dbtype !== null && repeated) savedChildIds[name] = [...dbObj[name]];
           }
           // in case any children haven't finished saving...
-          await Promise.all(savingChildren);
+          await childrenSaved;
         } catch (err) {
           // leave the object saveable so the user's edit isn't silently lost
           dirty = true;
+          savingFields.forEach((name) => changedFields.add(name));
+          metaChanged ||= savingMeta;
           throw err;
         } finally {
           saving = false;
@@ -507,6 +584,16 @@ function createClientObject(
       }
       if (removing) {
         return removing;
+      }
+    },
+
+    // Appends already-loaded children to a repeated field without marking
+    // this object dirty. `persisted` says whether the server list already
+    // includes them (so save() won't try to re-add them).
+    _adoptChildren(name: string, children: Schema.Entity[], persisted: boolean) {
+      data[name] = [...(data[name] ?? []), ...children];
+      if (persisted) {
+        savedChildIds[name] = [...(savedChildIds[name] ?? []), ...children.map((child) => child.id)];
       }
     },
 
@@ -553,6 +640,7 @@ function createClientObject(
       if (meta[key] !== value) {
         meta[key] = value;
         dirty = true;
+        metaChanged = true;
       }
     },
   });
@@ -616,6 +704,60 @@ export async function getProjectOrFail(
   if (asyncProject) return ["AsyncProject", asyncProject as Schema.AsyncProject];
   if (realtimeProject) return ["RealtimeProject", realtimeProject as Schema.RealtimeProject];
   throw new Error("No project found.");
+}
+
+/**
+ * Finds entries and notes that point at this project (via `projectId`) but
+ * are missing from its `entries`/`notes` list, shows them, and re-links
+ * them on the server.
+ *
+ * These orphans exist because older versions of save() could write a new
+ * child but then fail (or be overwritten by another member's stale save)
+ * when updating the project's list, leaving the child invisible to everyone.
+ *
+ * Viewers can't write the project, so for them orphans are shown but not
+ * re-linked; the next editor or owner to open the project fixes it for good.
+ */
+export async function recoverOrphanedChildren(
+  project: Schema.AsyncProject | Schema.RealtimeProject
+): Promise<void> {
+  const projectStore: Schema.EntityName =
+    "entries" in project ? "AsyncProject" : "RealtimeProject";
+  const fields: [string, Schema.EntityName][] =
+    projectStore === "AsyncProject"
+      ? [["entries", "AsyncEntry"], ["notes", "ProjectNote"]]
+      : [["notes", "ProjectNote"]];
+
+  for (const [field, childStore] of fields) {
+    try {
+      const snap = await getDocs(
+        query(collection(db, childStore), where("projectId", "==", project.id))
+      );
+      const listed = new Set(
+        ((project as any)[field] as Schema.Entity[]).map((child) => child.id)
+      );
+      const orphanIds = snap.docs.map((d) => d.id).filter((childId) => !listed.has(childId));
+      if (!orphanIds.length) continue;
+
+      const orphans = (
+        await Promise.all(orphanIds.map((childId) => getEntry(childStore, childId).catch(() => null)))
+      ).filter((child): child is Schema.Entity => child !== null);
+      if (!orphans.length) continue;
+
+      let persisted = false;
+      try {
+        await updateDoc(doc(db, projectStore, project.id), {
+          [field]: arrayUnion(...orphans.map((child) => child.id)),
+        });
+        persisted = true;
+      } catch (err) {
+        console.warn(`Couldn't re-link ${orphans.length} orphaned ${childStore} (view-only?)`, err);
+      }
+      (project as any)._adoptChildren(field, orphans, persisted);
+    } catch (err) {
+      console.warn(`Orphan check for ${childStore} on ${project.id} failed`, err);
+    }
+  }
 }
 
 /**

@@ -30,6 +30,9 @@ function inviteId(projectId: string, email: string) {
 export async function createInvite(projectId: string, email: string, role: "editor" | "viewer") {
   const uid = getUid();
   if (!uid) throw new Error("User not authenticated");
+  // a stray space would make the invite id never match the invitee's login email
+  email = email.trim();
+  if (!/^[^\s@]+@[^\s@]+$/.test(email)) throw new Error("That doesn't look like an email address.");
 
   const currentUser = auth.currentUser
   const[,project] = await getProjectOrFail(projectId)

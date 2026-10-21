@@ -16,7 +16,7 @@
   import SelectField from "../components/SelectField.svelte";
   import SplashScreen from "../components/SplashScreen.svelte";
   import Header from "../components/type/Header.svelte";
-  import { getProjectOrFail, invalidateProjectCache } from "../data/database";
+  import { getProjectOrFail, invalidateProjectCache, recoverOrphanedChildren } from "../data/database";
   import type { AsyncProject, RealtimeProject } from "../data/schema";
   import type { ThenType } from "../types/utility";
   import dotTimeline from "../util/dotTimeline";
@@ -28,7 +28,10 @@
   // Bust the in-memory cache first so exports reflect any changes other
   // project members have saved since this tab last loaded the project.
   invalidateProjectCache(params.id);
-  let projectPromise = getProjectOrFail(params.id);
+  let projectPromise = getProjectOrFail(params.id).then(async (result) => {
+    await recoverOrphanedChildren(result[1]);
+    return result;
+  });
 
   let project: RealtimeProject | AsyncProject;
   let projectData: ThenType<typeof projectPromise> | undefined;
