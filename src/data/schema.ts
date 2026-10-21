@@ -112,6 +112,13 @@ export interface AsyncProject
       ]
     > {
       ownerUid: string;
+      /**
+       * When true, this project (and its AsyncEntry documents) can be read
+       * by anyone, without authentication — see the AsyncProject/AsyncEntry
+       * read rules in firestore.rules. Used for the public embed route
+       * (EmbedTimeline.svelte, e.g. for embedding in a Google Site).
+       */
+      publicShare: boolean;
     }
 
 const AsyncProjectSchema = makeSchema<AsyncProject>({
@@ -126,6 +133,7 @@ const AsyncProjectSchema = makeSchema<AsyncProject>({
   periodAlignment: [null, 0],
   reportingPeriod: [null, "day"],
   ownerUid: [null, ""],
+  publicShare: [null, false],
 });
 
 export interface DesignModel
@@ -144,11 +152,14 @@ const DesignModelSchema = makeSchema<DesignModel>({
 
 export interface ProjectNote
   extends Entity<EmptyMeta>,
-    Prepare<DataType.ProjectNote> {}
+    Prepare<DataType.ProjectNote> {
+      projectId: string;
+    }
 
 const ProjectNoteSchema = makeSchema<ProjectNote>({
   content: [null, ""],
   created: [null, currentDate],
+  projectId: [null,""],
 });
 
 interface RealtimeProjectMeta extends ProjectMeta {}
@@ -183,23 +194,29 @@ export interface RealtimeSession
     SetPropertyTypes<
       Prepare<DataType.RealtimeSession>,
       [["notes", TimedNote[]]]
-    > {}
+    > {
+      projectId: string;
+    }
 
 const RealtimeSessionSchema = makeSchema<RealtimeSession>({
   data: [null, emptyArr],
   duration: [null, 0],
   notes: ["TimedNote", true],
   start: [null, currentDate],
+  projectId: [null, ""],
 });
 
 export interface TimedNote
   extends Entity<EmptyMeta>,
-    Prepare<DataType.TimedNote> {}
+    Prepare<DataType.TimedNote> {
+      sessionId: string;
+    }
 
 const TimedNoteSchema = makeSchema<TimedNote>({
   content: [null, ""],
   created: [null, currentDate],
   time: [null, 0],
+  sessionId: [null,""],
 });
 
 export const Schema: Record<

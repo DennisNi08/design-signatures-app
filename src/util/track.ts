@@ -66,6 +66,7 @@ export default class SessionTracker {
   ) {
     this.project = project;
     this.session = newRealtimeSession();
+    this.session.projectId = project.id;
     this.activityStates = project.designModel.activities.map(() => false);
     this.pastTimes = this.activityStates.map(() => -1);
     this.lastToggleTime = this.activityStates.map(() => -1);

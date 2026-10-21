@@ -1,0 +1,140 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isMember(projectId) {
+      return exists(/databases/$(database)/documents/projectMembers/$(request.auth.uid + "_" + projectId));
+    }
+
+    function memberRole(projectId) {
+      return get(/databases/$(database)/documents/projectMembers/$(request.auth.uid + "_" + projectId)).data.role;
+    }
+
+    // The requester must hold a pending invite for this exact project+role;
+    // this stops an invitee from writing themselves a higher role than they
+    // were actually invited with (see projectMembers create rule below).
+    function invitedForRole(projectId, role) {
+      let invite = get(/databases/$(database)/documents/projectInvites/$(projectId + "_" + request.auth.token.email.lower())).data;
+      return invite.status == "pending" && invite.role == role;
+    }
+
+    // A project may be either an AsyncProject or a RealtimeProject; check
+    // ownership against whichever collection actually has this id.
+    function isProjectOwner(projectId) {
+      return (exists(/databases/$(database)/documents/AsyncProject/$(projectId))
+              && get(/databases/$(database)/documents/AsyncProject/$(projectId)).data.ownerUid == request.auth.uid)
+          || (exists(/databases/$(database)/documents/RealtimeProject/$(projectId))
+              && get(/databases/$(database)/documents/RealtimeProject/$(projectId)).data.ownerUid == request.auth.uid);
+    }
+
+    // True when the given AsyncProject has opted in to unauthenticated public
+    // viewing (e.g. for embedding its timeline in a Google Site). Only
+    // AsyncProject supports this flag — RealtimeProject is unaffected.
+    function asyncProjectIsPublic(projectId) {
+      return exists(/databases/$(database)/documents/AsyncProject/$(projectId))
+          && get(/databases/$(database)/documents/AsyncProject/$(projectId)).data.publicShare == true;
+    }
+
+    match /AsyncProject/{projectId} {
+  allow read: if (resource.data.publicShare == true)
+    || (request.auth != null && isMember(projectId));
+  allow update, delete: if request.auth != null && isMember(projectId) && memberRole(projectId) != "viewer";
+  allow create: if request.auth != null && request.resource.data.ownerUid == request.auth.uid;
+}
+match /RealtimeProject/{projectId} {
+  allow read: if request.auth != null && isMember(projectId);
+  allow update, delete: if request.auth != null && isMember(projectId) && memberRole(projectId) != "viewer";
+  allow create: if request.auth != null && request.resource.data.ownerUid == request.auth.uid;
+}
+
+    match /AsyncEntry/{entryId} {
+      allow read: if (request.auth != null && isMember(resource.data.projectId))
+        || asyncProjectIsPublic(resource.data.projectId);
+      allow update, delete: if request.auth != null
+        && isMember(resource.data.projectId)
+        && memberRole(resource.data.projectId) != "viewer";
+      allow create: if request.auth != null
+        && isMember(request.resource.data.projectId)
+        && memberRole(request.resource.data.projectId) != "viewer";
+    }
+
+    // DesignModel reads are public (even unauthenticated) because the
+    // public-embed timeline (see AsyncProject.publicShare) needs to read a
+    // project's DesignModel for activity names/colors without requiring the
+    // viewer to log in. Activity names/descriptions/colors aren't sensitive,
+    // and ids are unguessable, so this is an accepted, deliberate tradeoff.
+    //
+    // wellKnown DesignModels are shared, curated presets shown to every
+    // user. They are managed out-of-band via the Admin SDK (which bypasses
+    // these rules), never by client writes, so no signed-in user can create
+    // or tamper with a preset that other users rely on.
+    match /DesignModel/{modelId} {
+  allow read: if true;
+  allow update: if request.auth != null
+    && resource.data.wellKnown != true
+    && resource.data.ownerUid == request.auth.uid;
+  allow delete: if request.auth != null
+    && resource.data.wellKnown != true
+    && resource.data.ownerUid == request.auth.uid;
+  allow create: if request.auth != null
+    && request.resource.data.wellKnown != true
+    && request.resource.data.ownerUid == request.auth.uid;
+}
+    match /projectInvites/{inviteId} {
+  allow create: if request.auth != null
+    && isMember(request.resource.data.projectId)
+    && memberRole(request.resource.data.projectId) != "viewer";
+  allow read: if request.auth != null
+    && (resource.data.email == request.auth.token.email.lower()
+        || isMember(resource.data.projectId));
+  allow update, delete: if request.auth != null
+    && (resource.data.email == request.auth.token.email.lower()
+        || (isMember(resource.data.projectId) && memberRole(resource.data.projectId) != "viewer"));
+}
+
+    match /projectMembers/{membershipId} {
+  allow read: if request.auth != null
+  && (membershipId.matches(request.auth.uid + "_.*") || resource.data.uid == request.auth.uid);
+  allow create: if request.auth != null
+    && request.resource.data.uid == request.auth.uid
+    && (
+    (request.resource.data.role == "owner" && isProjectOwner(request.resource.data.projectId))
+      ||
+      invitedForRole(request.resource.data.projectId, request.resource.data.role)
+    );
+  allow delete: if request.auth != null
+    && (resource.data.uid == request.auth.uid
+        || (isMember(resource.data.projectId) && memberRole(resource.data.projectId) == "owner"));
+}
+match /ProjectNote/{noteId} {
+allow read: if request.auth != null
+    && isMember(resource.data.projectId);
+allow update, delete: if request.auth != null
+    && isMember(resource.data.projectId)
+    && memberRole(resource.data.projectId) != "viewer";
+  allow create: if request.auth != null
+    && isMember(request.resource.data.projectId)
+    && memberRole(request.resource.data.projectId) != "viewer";
+}
+match /RealtimeSession/{sessionID}{
+allow read: if request.auth != null
+    && isMember(resource.data.projectId);
+allow update, delete: if request.auth != null
+    && isMember(resource.data.projectId)
+    && memberRole(resource.data.projectId) != "viewer";
+  allow create: if request.auth != null
+    && isMember(request.resource.data.projectId)
+    && memberRole(request.resource.data.projectId) != "viewer";
+}
+match /TimedNote/{noteId}{
+allow read: if request.auth != null
+    && isMember(get(/databases/$(database)/documents/RealtimeSession/$(resource.data.sessionId)).data.projectId);
+allow update, delete: if request.auth != null
+    && isMember(get(/databases/$(database)/documents/RealtimeSession/$(resource.data.sessionId)).data.projectId)
+    && memberRole(get(/databases/$(database)/documents/RealtimeSession/$(resource.data.sessionId)).data.projectId) != "viewer";
+  allow create: if request.auth != null
+    && isMember(get(/databases/$(database)/documents/RealtimeSession/$(request.resource.data.sessionId)).data.projectId)
+    && memberRole(get(/databases/$(database)/documents/RealtimeSession/$(request.resource.data.sessionId)).data.projectId) != "viewer";
+}
+  }
+}

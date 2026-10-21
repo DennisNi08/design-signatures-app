@@ -8,6 +8,7 @@
   import editIcon from "@iconify-icons/ic/baseline-edit";
   import exportIcon from "@iconify-icons/ic/baseline-share";
   import inviteIcon from "@iconify-icons/ic/baseline-person-add";
+  import publicIcon from "@iconify-icons/ic/baseline-public";
   import unarchiveIcon from "@iconify-icons/ic/baseline-unarchive";
   import { pop, push } from "svelte-spa-router";
   import {
@@ -17,12 +18,15 @@
   import type { AsyncProject, RealtimeProject } from "../data/schema";
   import { isAsyncProject} from "../types/utility"
   import { createInvite, getSentInvites, revokeInvite, type ProjectInvite } from "../data/invites";
+  import Checkbox from "./Checkbox.svelte";
   import InputField from "./InputField.svelte";
   import Modal from "./Modal.svelte";
   import SegmentedSelector from "./SegmentedSelector.svelte";
   import type { PopupMenuDescriptor } from "./PopupMenu.svelte";
   import PopupMenu from "./PopupMenu.svelte";
   import { removeProjectMemberships } from "../data/database";
+  import { downloadBlob } from "../util/download";
+  import { generateTimelineSnapshot } from "../util/timelineSnapshot";
 
   export let project: AsyncProject | RealtimeProject;
 
@@ -30,6 +34,7 @@
   let toggleProjectCompleteOpen = false;
   let deleteProjectOpen = false;
   let inviteOpen = false;
+  let embedOpen = false;
 
   let menuDescriptor: PopupMenuDescriptor;
   function createMenuDescriptor() {
@@ -48,6 +53,15 @@
         icon: exportIcon,
         action: () => push(`/projects/${project.id}/export`),
       },
+      ...(isAsyncProject(project)
+        ? [
+            {
+              label: "Embed",
+              icon: publicIcon,
+              action: () => (embedOpen = true),
+            },
+          ]
+        : []),
       { separator: true },
       {
         label: project.active ? "Archive" : "Unarchive",
@@ -159,6 +173,49 @@
       revokingId = undefined;
     }
   }
+
+  // public embed
+  let embedSaving = false;
+  let embedCopied = false;
+  $: embedUrl = `${location.origin}/#/embed/timeline/${project.id}`;
+  async function setPublicShare(value: boolean) {
+    if (!isAsyncProject(project)) return;
+    embedSaving = true;
+    try {
+      project.publicShare = value;
+      await project.save();
+      project = project;
+    } finally {
+      embedSaving = false;
+    }
+  }
+  async function copyEmbedUrl() {
+    await navigator.clipboard.writeText(embedUrl);
+    embedCopied = true;
+    setTimeout(() => (embedCopied = false), 1500);
+  }
+
+  // static snapshot (PNG)
+  let snapshotGenerating = false;
+  let snapshotError: string | undefined;
+  async function downloadSnapshot() {
+    if (!isAsyncProject(project)) return;
+    snapshotGenerating = true;
+    snapshotError = undefined;
+    try {
+      const blob = await generateTimelineSnapshot(project);
+      downloadBlob(`${safeName(project.name)}-timeline.png`, blob);
+    } catch (err) {
+      snapshotError =
+        "Couldn't generate snapshot: " +
+        (err instanceof Error ? err.message : String(err));
+    } finally {
+      snapshotGenerating = false;
+    }
+  }
+  function safeName(name: string) {
+    return name.trim().replace(/[\W\:\/\\]+/g, "-");
+  }
 </script>
 
 <PopupMenu label="Options" descriptor={menuDescriptor} alignment="right" />
@@ -218,6 +275,50 @@
 </Modal>
 
 <Modal
+  bind:visible={embedOpen}
+  title="Public Embed"
+  buttons={[{ label: "Close", onClick: () => (embedOpen = false) }]}
+>
+  <p>
+    Turn this on to let anyone with the link view this project's weekly
+    timeline and the most recent week's notes &mdash; no login required.
+    Useful for embedding into a Google Site. Nothing else about the project
+    is shared, and you can turn this off at any time.
+  </p>
+  {#if isAsyncProject(project)}
+    <Checkbox
+      label="Allow public viewing"
+      checked={project.publicShare}
+      disabled={embedSaving}
+      on:change={(e) => setPublicShare((e.target as HTMLInputElement).checked)}
+    />
+    {#if project.publicShare}
+      <InputField label="Embed URL" value={embedUrl} readonly />
+      <button class="copy-url" on:click={copyEmbedUrl}>
+        {embedCopied ? "Copied!" : "Copy link"}
+      </button>
+    {/if}
+
+    <p class="snapshot-heading">
+      Can't use a live embed? Download a one-time snapshot image instead
+      &mdash; the same timeline shown on the Export screen, with this week's
+      notes underneath. You can paste this directly into a Google Site as
+      an image; it won't update automatically.
+    </p>
+    <button
+      class="copy-url"
+      on:click={downloadSnapshot}
+      disabled={snapshotGenerating}
+    >
+      {snapshotGenerating ? "Generating…" : "Download snapshot (PNG)"}
+    </button>
+    {#if snapshotError}
+      <p class="snapshot-error">{snapshotError}</p>
+    {/if}
+  {/if}
+</Modal>
+
+<Modal
   bind:visible={deleteProjectOpen}
   title="Delete Project"
   buttons={[
@@ -259,6 +360,8 @@
 </Modal>
 
 <style lang="scss">
+  @use "src/styles/tokens" as *;
+
   .pending-heading {
     margin: 1rem 0 0.25rem 0;
   }
@@ -276,5 +379,15 @@
   }
   .revoke {
     flex-shrink: 0;
+  }
+  .copy-url {
+    margin-top: -0.25rem;
+  }
+  .snapshot-heading {
+    margin: 1rem 0 0.5rem 0;
+  }
+  .snapshot-error {
+    color: $accent-danger-color;
+    margin-top: 0.5rem;
   }
 </style>

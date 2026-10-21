@@ -151,13 +151,11 @@ async function go() {
       disabled={!canContinue || isCreating}
     />
   {:else}
-  {#if designModel}
     <BuilderFrame
       bind:designModel
       showModal={params.wild === BUILDER_MODAL_SUFFIX}
     />
     {/if}
-  {/if}
 </main>
 
 <style lang="scss">

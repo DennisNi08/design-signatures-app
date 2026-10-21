@@ -12,7 +12,7 @@
   import TrackingModeOption from "../components/TrackingModeOption.svelte";
   import Header from "../components/type/Header.svelte";
 
-  let option: "realtime" | "async" | null = null;
+  let option: "realtime" | "async" | null = "async";
 
   function go() {
     push(`/new/${option}/`);
@@ -27,7 +27,6 @@
       component={TrackingModeOption}
       direction="vertical"
       options={[
-        ["realtime", { type: "realtime" }],
         ["async", { type: "async" }],
       ]}
       bind:value={option}

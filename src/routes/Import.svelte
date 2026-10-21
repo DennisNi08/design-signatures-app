@@ -295,42 +295,47 @@
 
   let projectID: string = "";
   let errorStack: string | undefined = undefined;
-  async function doImport() {
-    state = "importing";
-    try {
-      let { data } = rawData;
-      let result = await importer(deepClone(data), {
-        dryRun: false,
-        globalOptions: {
-          forceNew: forceCopy,
+ import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "../data/firebase";
+import { getUid } from "../data/authState.svelte";
+
+async function doImport() {
+  state = "importing";
+  try {
+    let { data } = rawData;
+    let result = await importer(deepClone(data), {
+      dryRun: false,
+      globalOptions: {
+        forceNew: forceCopy,
+      },
+      entityOptions: {},
+      typeOptions: {
+        DesignModel: {
+          forceNew: designModelDecision === "copy",
+          useExisting: designModelDecision === "skip",
         },
-        entityOptions: {},
-        typeOptions: {
-          DesignModel: {
-            forceNew: designModelDecision === "copy",
-            useExisting: designModelDecision === "skip",
-          },
-        },
-      });
-      if (!result.entity) {
-        throw new Error(
-          "Import: expected an entity to be returned after importing."
-        );
-      }
-      if (result.entity.active) {
-        pushRecentProject(result.entity.id);
-      }
-      projectID = result.entity.id;
-      state = "done";
-    } catch (e) {
-      errorStack = e instanceof Error ? e.stack : undefined;
-      console.error(e);
-      bail(
-        "An error occured while importing.",
-        e instanceof Error ? e.message : undefined
+      },
+    });
+    if (!result.entity) {
+      throw new Error(
+        "Import: expected an entity to be returned after importing."
       );
     }
+
+    if (result.entity.active) {
+      pushRecentProject(result.entity.id);
+    }
+    projectID = result.entity.id;
+    state = "done";
+  } catch (e) {
+    errorStack = e instanceof Error ? e.stack : undefined;
+    console.error(e);
+    bail(
+      "An error occured while importing.",
+      e instanceof Error ? e.message : undefined
+    );
   }
+}
 
   function copyStack() {
     if (errorStack) {

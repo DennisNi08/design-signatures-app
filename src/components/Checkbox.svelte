@@ -16,7 +16,7 @@
 </script>
 
 <div class="wrapper">
-  <input type="checkbox" bind:checked {id} {disabled} />
+  <input type="checkbox" bind:checked {id} {disabled} on:change />
   <label for={id}>
     <p>{label}</p>
     {#if helptext}

@@ -14,6 +14,7 @@
   export let id: string | null = null;
 
   let loading = true;
+  let loadFailed = false;
   let project: RealtimeProject | AsyncProject | null = null;
 
   if (newProjectPlaceholder) {
@@ -24,8 +25,11 @@
         project = (await getProjectOrFail(id))[1];
         loading = false;
       }
-    })().catch(() => {
+    })().catch((err) => {
+      console.error("Failed to load project", id, err);
       project = null;
+      loadFailed = true;
+      loading = false;
     });
   }
 </script>
@@ -56,7 +60,7 @@
   <div class="link" class:loading class:new={newProjectPlaceholder}>
     {#if !loading && !newProjectPlaceholder && project}
       <span>{project.name}</span>
-    {:else if !loading}New project{/if}
+    {:else if loadFailed}Couldn't load project{:else if !loading}New project{/if}
   </div>
 </div>
 

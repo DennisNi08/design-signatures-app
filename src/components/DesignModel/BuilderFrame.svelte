@@ -12,9 +12,12 @@
   import Chooser from "./Chooser.svelte";
 
   let startingPoint: DesignModel | null = null;
-  export let designModel: DesignModel;
+  export let designModel: DesignModel | null;
 
   export let showModal: boolean;
+  $: if (startingPoint !== null && designModel === null) {
+    designModel = startingPoint;
+  }
 </script>
 
 <div class="device-frame">
@@ -28,7 +31,7 @@
         bind:selectedDesignModel={startingPoint}
       />
     {:else}
-      <Builder {startingPoint} bind:designModel {showModal} />
+      <Builder {startingPoint} bind:designModel={designModel!} {showModal} />
     {/if}
   </ContentFrame>
 </div>

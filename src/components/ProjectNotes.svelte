@@ -26,6 +26,7 @@
 
   function newNote() {
     activeNote = newProjectNote();
+    activeNote.projectId = project.id;
     activeNoteContent = "";
     activeNoteIsNew = true;
     open();

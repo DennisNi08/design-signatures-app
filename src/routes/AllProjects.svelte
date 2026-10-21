@@ -9,32 +9,17 @@
   import ProjectCard from "../components/ProjectCard.svelte";
   import SplashScreen from "../components/SplashScreen.svelte";
   import Header from "../components/type/Header.svelte";
-  import {
-    getUserProjectsIds, getProjectOrFail
-  } from "../data/database";
+  import { getUserProjectIdsByRecency } from "../data/database";
   import { getUid } from "../data/authState.svelte";
-  import { sortBy } from "../util/sort";
 
+  // Sorts using just the top-level project docs so the list appears right
+  // away; each ProjectCard then loads its own full project in parallel.
   let projectPromise = (async function () {
-  const uid = getUid();
-  if (!uid) return [];
-
-  const ids = await getUserProjectsIds(uid);
-
-  const results = await Promise.all(
-    ids.map((id) =>
-      getProjectOrFail(id).catch((err) => {
-        console.error("Failed to load project", id, err);
-        return null;
-      })
-    )
-  );
-  const unsortedProjects = results
-    .filter((r) => r !== null)
-    .map(([, project]) => project);
-
-  return sortBy("modified", unsortedProjects, false);
-})();
+    const uid = getUid();
+    if (!uid) return [];
+    const ids = await getUserProjectIdsByRecency(uid);
+    return ids.map((id) => ({ id }));
+  })();
 </script>
 
 {#await projectPromise}

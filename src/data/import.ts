@@ -51,6 +51,9 @@ import type {
   RealtimeSession,
   TimedNote,
 } from "./schema";
+import { getUid } from "./authState.svelte"
+import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "./firebase";
 
 export interface ImportResult<E extends Entity> {
   type: EntityName;
@@ -498,79 +501,117 @@ export async function importAsyncProject(
       if (!project) {
         project = newAsyncProject();
       }
-      let awaiting: Promise<void>[] = [];
       if (data.active !== undefined) project.active = data.active;
       if (data.created) project.created = data.created;
       if (data.description) project.description = data.description;
-
-      awaiting.push(
-        (async () => {
-          let designModelResult = await importDesignModel(
-            data.designModel,
-            options,
-            `${trace}:designModel`,
-            idSet
-          );
-          if (!designModelResult.entity) {
-            throw new Error(
-              `[${trace}:designModel] Expected to receive entity from import!`
-            );
-          }
-          result.children.DesignModel = [designModelResult];
-          project.designModel = designModelResult.entity;
-        })()
-      );
-
-      awaiting.push(
-        (async () => {
-          let [entries, entryResults] = await importChildren(
-            data.entries,
-            options,
-            `${trace}:entries`,
-            idSet,
-            importAsyncEntry
-          );
-          project.entries = entries;
-          result.children.AsyncEntry = entryResults;
-        })()
-      );
-
       if (data.modified) project.modified = data.modified;
       if (forceNew) {
         project.name = data.name + " (Copy)";
       } else {
         project.name = data.name;
       }
-
-      if (data.notes) {
-        // typescript can't rule out "undefined" from data.notes inside
-        // the async function, so the parameter helps it out :)
-        awaiting.push(
-          (async (notesData) => {
-            let [notes, entryResults] = await importChildren(
-              notesData,
-              options,
-              `${trace}:notes`,
-              idSet,
-              importProjectNote
-            );
-            project.notes = notes;
-            result.children.ProjectNote = entryResults;
-          })(data.notes)
-        );
-      } else {
-        result.children.ProjectNote = [];
-      }
-
       if (data.periodAlignment) project.periodAlignment = data.periodAlignment;
       project.reportingPeriod = data.reportingPeriod;
 
-      await Promise.all(awaiting);
+      console.log("STEP 1: about to import design model");
+      let designModelResult = await importDesignModel(
+        data.designModel,
+        options,
+        `${trace}:designModel`,
+        idSet
+      );
+      console.log("STEP 2: design model imported", designModelResult.entity?.id);
+      if (!designModelResult.entity) {
+        throw new Error(
+          `[${trace}:designModel] Expected to receive entity from import!`
+        );
+      }
+      result.children.DesignModel = [designModelResult];
+      project.designModel = designModelResult.entity;
+
+      const uid = getUid();
+      if (uid && !project.ownerUid) {
+        project.ownerUid = uid;
+      }
+      console.log("STEP 3: about to save project, ownerUid:", project.ownerUid, "uid:", uid);
+
       if (forceNew) {
         await project.save();
       } else {
         await saveEntityWithId(project, data.id);
       }
+      console.log("STEP 4: Project saved with id:", project.id);
+
+      if (uid) {
+        const membershipRef = doc(
+          db,
+          "projectMembers",
+          `${uid}_${project.id}`
+        );
+        const existingMembership = await getDoc(membershipRef);
+        console.log(
+          "STEP 5: existingMembership.exists():",
+          existingMembership.exists()
+        );
+        if (!existingMembership.exists()) {
+          await setDoc(membershipRef, {
+            projectId: project.id,
+            uid,
+            role: "owner",
+            status: "active",
+            joinedAt: serverTimestamp(),
+          });
+          console.log("STEP 6: membership setDoc succeeded");
+        }
+      }
+
+      console.log(
+        "STEP 7: about to import entries, count:",
+        data.entries.length
+      );
+      let [entries, entryResults] = await importChildren(
+        data.entries,
+        options,
+        `${trace}:entries`,
+        idSet,
+        (entryData, opts, tr, ids) =>
+          importAsyncEntry(entryData, opts, tr, ids, project!.id)
+      );
+      console.log("STEP 8: entries imported", entries.length);
+      entries.forEach((entry) => {
+        entry.projectId = project!.id;
+      });
+      await Promise.all(entries.map((entry) => entry.save()));
+      console.log("STEP 9: entries saved with projectId");
+      project.entries = entries;
+      result.children.AsyncEntry = entryResults;
+
+      if (data.notes) {
+        console.log(
+          "STEP 10: about to import notes, count:",
+          data.notes.length
+        );
+        let [notes, noteResults] = await importChildren(
+          data.notes,
+          options,
+          `${trace}:notes`,
+          idSet,
+          importProjectNote
+        );
+        notes.forEach((note) => {
+          note.projectId = project!.id;
+        });
+        await Promise.all(notes.map((note) => note.save()));
+        console.log("STEP 11: notes saved with projectId");
+        project.notes = notes;
+        result.children.ProjectNote = noteResults;
+      } else {
+        result.children.ProjectNote = [];
+      }
+
+      console.log("STEP 12: about to do final project save");
+      await project.save();
+      console.log("STEP 13: final save complete");
     }
     result.entity = project;
   }
@@ -581,7 +622,8 @@ export async function importAsyncEntry(
   data: Record<string, any>,
   options: ImportOptions,
   trace: string = "Root(AsyncEntry)",
-  idSet: Set<String> = new Set()
+  idSet: Set<String> = new Set(),
+  projectId?: string
 ): Promise<ImportResult<AsyncEntry>> {
   let { dryRun, overwrite, forceNew, useExisting, result, typeAssert } =
     importInit<AsyncEntry>(data, options, trace, idSet, "AsyncEntry");
@@ -654,6 +696,7 @@ export async function importAsyncEntry(
       if (!entry) {
         entry = newAsyncEntry();
       }
+      if (projectId) entry.projectId = projectId;
       if (data.created) entry.created = data.created;
       entry.data = data.data.map(({ note, value }) => ({
         note: note ?? "",
@@ -669,7 +712,9 @@ export async function importAsyncEntry(
         await saveEntityWithId(entry, data.id);
       }
     }
+
     result.entity = entry;
+
   }
 
   return result;
@@ -797,7 +842,8 @@ export async function importProjectNote(
   data: Record<string, any>,
   options: ImportOptions,
   trace: string = "Root(ProjectNote)",
-  idSet: Set<String> = new Set()
+  idSet: Set<String> = new Set(),
+  projectId?: string
 ): Promise<ImportResult<ProjectNote>> {
   let { dryRun, overwrite, forceNew, useExisting, result, typeAssert } =
     importInit<ProjectNote>(data, options, trace, idSet, "ProjectNote");
@@ -848,6 +894,8 @@ export async function importProjectNote(
       if (!note) {
         note = newProjectNote();
       }
+      if (projectId) note.projectId = projectId;
+      note.content = data.content;
       note.content = data.content;
       if (data.created) note.created = data.created;
       if (forceNew) {
@@ -984,33 +1032,13 @@ export async function importRealtimeProject(
       if (!project) {
         throw new Error(`[${trace}|useExisting] No existing entity!`);
       }
-    } else {
+      } else {
       if (!project) {
         project = newRealtimeProject();
       }
-      let awaiting: Promise<void>[] = [];
       if (data.active !== undefined) project.active = data.active;
       if (data.created) project.created = data.created;
       if (data.description) project.description = data.description;
-
-      awaiting.push(
-        (async () => {
-          let designModelResult = await importDesignModel(
-            data.designModel,
-            options,
-            `${trace}:designModel`,
-            idSet
-          );
-          if (!designModelResult.entity) {
-            throw new Error(
-              `[${trace}:designModel] Expected to receive entity from import!`
-            );
-          }
-          result.children.DesignModel = [designModelResult];
-          project.designModel = designModelResult.entity;
-        })()
-      );
-
       if (data.modified) project.modified = data.modified;
       if (forceNew) {
         project.name = data.name + " (Copy)";
@@ -1018,50 +1046,95 @@ export async function importRealtimeProject(
         project.name = data.name;
       }
 
-      if (data.notes) {
-        // typescript can't rule out "undefined" from data.notes inside
-        // the async function, so the parameter helps it out :)
-        awaiting.push(
-          (async (notesData) => {
-            let [notes, entryResults] = await importChildren(
-              notesData,
-              options,
-              `${trace}:notes`,
-              idSet,
-              importProjectNote
-            );
-            project.notes = notes;
-            result.children.ProjectNote = entryResults;
-          })(data.notes)
+      // Import the design model first -- needed on the project before its
+      // first save, and doesn't depend on the project having an id yet.
+      let designModelResult = await importDesignModel(
+        data.designModel,
+        options,
+        `${trace}:designModel`,
+        idSet
+      );
+      if (!designModelResult.entity) {
+        throw new Error(
+          `[${trace}:designModel] Expected to receive entity from import!`
         );
-      } else {
-        result.children.ProjectNote = [];
+      }
+      result.children.DesignModel = [designModelResult];
+      project.designModel = designModelResult.entity;
+
+      // Set ownership BEFORE the first save, so the create write itself
+      // satisfies the security rule (which checks ownerUid at create time).
+      const uid = getUid();
+      if (uid && !project.ownerUid) {
+        project.ownerUid = uid;
       }
 
-      awaiting.push(
-        (async () => {
-          let [sessions, sessionResults] = await importChildren(
-            data.sessions,
-            options,
-            `${trace}:sessions`,
-            idSet,
-            importRealtimeSession
-          );
-          project.sessions = sessions;
-          result.children.RealtimeSession = sessionResults;
-        })()
-      );
-
-      await Promise.all(awaiting);
+      // Save the project now, BEFORE importing notes/sessions below, so it
+      // has its final real id (a fresh one if forceNew) and so ownership +
+      // membership can be established before any child entity tries to
+      // save -- child entities' security rules require project membership
+      // to already exist.
       if (forceNew) {
         await project.save();
       } else {
         await saveEntityWithId(project, data.id);
       }
+
+      if (uid) {
+        const membershipRef = doc(db, "projectMembers", `${uid}_${project.id}`);
+        const existingMembership = await getDoc(membershipRef);
+        if (!existingMembership.exists()) {
+          await setDoc(membershipRef, {
+            projectId: project.id,
+            uid,
+            role: "owner",
+            status: "active",
+            joinedAt: serverTimestamp(),
+          });
+        }
+      }
+
+      // Now that the project is saved and membership exists, it's safe to
+      // import notes and sessions, which each set their own projectId and
+      // are checked against project membership by security rules.
+      if (data.notes) {
+        let [notes, noteResults] = await importChildren(
+          data.notes,
+          options,
+          `${trace}:notes`,
+          idSet,
+          (noteData, opts, tr, ids) =>
+            importProjectNote(noteData, opts, tr, ids, project!.id)
+        );
+        notes.forEach((note) => {
+          note.projectId = project!.id;
+        });
+        await Promise.all(notes.map((note) => note.save()));
+        project.notes = notes;
+        result.children.ProjectNote = noteResults;
+      } else {
+        result.children.ProjectNote = [];
+      }
+
+      let [sessions, sessionResults] = await importChildren(
+        data.sessions,
+        options,
+        `${trace}:sessions`,
+        idSet,
+        importRealtimeSession
+      );
+      sessions.forEach((session) => {
+        session.projectId = project!.id;
+      });
+      await Promise.all(sessions.map((session) => session.save()));
+      project.sessions = sessions;
+      result.children.RealtimeSession = sessionResults;
+
+      // Final save to persist the notes/sessions id arrays on the project.
+      await project.save();
     }
     result.entity = project;
   }
-
   return result;
 }
 
@@ -1159,6 +1232,15 @@ export async function importRealtimeSession(
       } else {
         await saveEntityWithId(session, data.id);
       }
+
+       await Promise.all(
+        session.notes.map(async (note) => {
+          if (note.sessionId !== session!.id) {
+            note.sessionId = session!.id;
+            await note.save();
+          }
+        })
+      );
     }
     result.entity = session;
   }

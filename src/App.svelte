@@ -4,13 +4,13 @@
 -->
 <script lang="ts">
   import Router, { type RouteDefinition, push } from "svelte-spa-router";
-  import { createPresets } from "./data/designModelPresets";
   import { awaitObjectUpgradeIfNeeded } from "./data/upgradeObjects";
   import AboutProject from "./routes/about/AboutProject.svelte";
   import AllProjects from "./routes/AllProjects.svelte";
   import ComponentLibrary from "./routes/dev/ComponentLibrary.svelte";
   import DBEditor from "./routes/dev/DBEditor.svelte";
   import DevTools from "./routes/dev/DevTools.svelte";
+  import EmbedTimeline from "./routes/EmbedTimeline.svelte";
   import Home from "./routes/Home.svelte";
   import Import from "./routes/Import.svelte";
   import Models from "./routes/about/Models.svelte";
@@ -34,24 +34,21 @@
   import { isLoading, getUser } from "./data/authState.svelte";
   import { onMount } from "svelte";
   import Invites from "./routes/Invites.svelte";
-  let presetsCreated = false;
 
   awaitObjectUpgradeIfNeeded();
   $effect(() => {
   if (isLoading()) return;
   const onLoginPage = currentHash.startsWith("#/login");
+  // The public embed page is meant to be viewed logged-out (e.g. embedded in
+  // a Google Site); it enforces its own access via Firestore rules
+  // (AsyncProject.publicShare), so it must not be swept into the login
+  // redirect below.
+  const onPublicEmbedPage = currentHash.startsWith("#/embed/");
 
-  if (!getUser() && !onLoginPage) {
+  if (!getUser() && !onLoginPage && !onPublicEmbedPage) {
     push("/login");
   } else if (getUser() && onLoginPage) {
     push("/");
-  }
-
-  if (getUser() && !presetsCreated) {
-    presetsCreated = true;
-    createPresets().catch((err) => {
-      console.warn("createPresets failed", err)
-    });
   }
 });
 
@@ -71,6 +68,8 @@
     "/": Home, // Home
     "/login": Login, //Login Page,
     "/invites": Invites, // Invites
+
+    "/embed/timeline/:id": EmbedTimeline, // Public embed (no login required)
 
     "/new/realtime/*": NewRealtimeProject,
     "/new/realtime": RedirectAddPath,

@@ -46,6 +46,7 @@
     proj.sessions = [];
     proj.active = true;
     proj.ownerUid = getUid() ?? "";
+    console.log("About to save, ownerUid:", proj.ownerUid, "designModel:", proj.designModel, "current auth uid:", getUid());
     await proj.save();
 
     const uid = getUid();

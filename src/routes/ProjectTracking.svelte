@@ -26,7 +26,7 @@
   import TrackingTimer from "../components/TrackingTimer.svelte";
   import UndoTrackingModal from "../components/UndoTrackingModal.svelte";
   import CONFIG from "../data/config";
-  import { getRealtimeProject, newTimedNote } from "../data/database";
+  import { getRealtimeProject, invalidateProjectCache, newTimedNote } from "../data/database";
   import { pushRecentProject } from "../data/recentProjects";
   import type { RealtimeProject } from "../data/schema";
   import { setInArray } from "../util/array";
@@ -51,6 +51,9 @@
 
   let errorLoading = false;
   let hasProject = false;
+  // Bust the in-memory cache first so a fresh visit reflects any changes
+  // other project members have saved since this tab last loaded it.
+  invalidateProjectCache(params.id);
   let thenProject = getRealtimeProject(params.id);
   let project: RealtimeProject;
   thenProject.then((_project) => {
@@ -266,15 +269,23 @@
   let noteSaving = false;
   async function saveNote() {
     noteSaving = true;
-    const project = await thenProject;
-    const note = newTimedNote();
-    note.content = noteText;
-    note.time = pastSessionTime;
-    tracker.session.notes = [...tracker.session.notes, note];
-    await project.save();
-    await closeModal();
-    noteText = "";
-    noteSaving = false;
+    try {
+      const project = await thenProject;
+      if (!tracker.session.id) {
+        await tracker.session.save();
+      }
+      const note = newTimedNote();
+      // firestore.rules authorizes TimedNotes via their parent session
+      note.sessionId = tracker.session.id;
+      note.content = noteText;
+      note.time = pastSessionTime;
+      tracker.session.notes = [...tracker.session.notes, note];
+      await project.save();
+      await closeModal();
+      noteText = "";
+    } finally {
+      noteSaving = false;
+    }
   }
   function closeNote() {
     closeModal();

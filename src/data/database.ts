@@ -356,6 +356,9 @@ function createClientObject(
   const obj = {};
   let meta: Record<string, any> = {};
   const childResolvers = [];
+  // ids of repeated children that exist but couldn't be read (e.g. a
+  // permission or network error); kept so save() doesn't drop them
+  const unreadableChildIds: Record<string, string[]> = {};
 
   // client obj private properties
   let dirty = !_id;
@@ -381,14 +384,24 @@ function createClientObject(
           data[name] = null;
         }
       } else {
-        if (rawObj[name].length) {
+        const childIDs: string[] = Array.isArray(rawObj[name]) ? rawObj[name] : [];
+        if (childIDs.length) {
           childResolvers.push(
             (async () => {
-              data[name] = await Promise.all(
-                rawObj[name].map((childID: string) =>
-                  getEntry(modelName, childID)
+              const failed = new Set<string>();
+              const children = await Promise.all(
+                childIDs.map((childID) =>
+                  getEntry(modelName, childID).catch((err) => {
+                    console.warn(`Couldn't load ${modelName} ${childID}`, err);
+                    failed.add(childID);
+                    return null;
+                  })
                 )
               );
+              // Deleted children (null) are dropped so the next save cleans
+              // them up; unreadable ones are hidden but preserved on save.
+              data[name] = children.filter((child) => child !== null);
+              unreadableChildIds[name] = childIDs.filter((childID) => failed.has(childID));
             })()
           );
         } else {
@@ -444,24 +457,15 @@ function createClientObject(
           } else {
             // child db entry - save this too!
             // no issues with cycles - save is instant if already saving
-            // that's actually maybe not ideal. we can save the promise
-            // and return that if it's still saving? (but then need to add
-            // another parameter or something)
             if (repeated) {
-              dbObj[name] = [];
               if (!data[name]) data[name] = [];
-              savingChildren.push(
-                Promise.all(
-                  (data[name] as any[]).map((child, i) => {
-                    if (child === null) {
-                      return null; // await Promise.resolve([null]) -> [null]
-                    }
-                    const childPromise = child.save();
-                    dbObj[name][i] = child.id;
-                    return childPromise;
-                  })
-                )
-              );
+              const children = (data[name] as any[]).filter((child) => child !== null);
+              savingChildren.push(Promise.all(children.map((child) => child.save())));
+              const childIds: string[] = children.map((child) => child.id);
+              for (const unreadableId of unreadableChildIds[name] ?? []) {
+                if (!childIds.includes(unreadableId)) childIds.push(unreadableId);
+              }
+              dbObj[name] = childIds;
             } else {
               if (data[name] === null) {
                 dbObj[name] = null;
@@ -477,18 +481,21 @@ function createClientObject(
 
         dirty = false;
 
-        // dbObj should be well formed now
-        // write to database...
-        if (isNewEntry) {
-          await add(store, dbObj);
-        } else {
-          await update(store, dbObj);
+        try {
+          if (isNewEntry) {
+            await add(store, dbObj);
+          } else {
+            await update(store, dbObj);
+          }
+          // in case any children haven't finished saving...
+          await Promise.all(savingChildren);
+        } catch (err) {
+          // leave the object saveable so the user's edit isn't silently lost
+          dirty = true;
+          throw err;
+        } finally {
+          saving = false;
         }
-
-        // in case any children haven't finished saving...
-        await Promise.all(savingChildren);
-
-        saving = false;
       }
     },
     remove() {
@@ -611,6 +618,87 @@ export async function getProjectOrFail(
   throw new Error("No project found.");
 }
 
+/**
+ * Evicts a single cached entry so the next getEntry() call for it re-fetches
+ * from Firestore instead of returning the (possibly stale) in-memory copy.
+ */
+function invalidateEntry(store: Schema.EntityName, id: DBID): void {
+  objStore[store].delete(id);
+  resolving[store].delete(id);
+}
+
+/**
+ * Busts the in-memory cache (see `objStore`) for a project and everything
+ * reachable from it in the cache (entries, notes, sessions, their timed
+ * notes, and the design model), so the next load re-reads it from Firestore.
+ *
+ * getEntry() caches every entity forever once loaded and nothing listens for
+ * remote changes, so without this a member who already viewed a project in
+ * this tab keeps seeing it as it was at that first visit. Call this right
+ * before (re)loading a project for viewing so each visit reflects edits
+ * other members have saved since.
+ *
+ * Walks only what's already cached, so it costs no network round-trips:
+ * anything not cached will be fetched fresh anyway. Does nothing if any
+ * object in the project has unsaved or in-flight changes, since refetching
+ * would discard them.
+ */
+export function invalidateProjectCache(id: DBID): void {
+  const project = (objStore.AsyncProject.get(id) ?? objStore.RealtimeProject.get(id)) as
+    | Record<string, any>
+    | undefined;
+  if (!project) return;
+
+  const toEvict: [Schema.EntityName, Record<string, any>][] = [];
+  const isAsync = objStore.AsyncProject.has(id);
+  toEvict.push([isAsync ? "AsyncProject" : "RealtimeProject", project]);
+  if (project.designModel) toEvict.push(["DesignModel", project.designModel]);
+  for (const note of project.notes ?? []) toEvict.push(["ProjectNote", note]);
+  for (const entry of project.entries ?? []) toEvict.push(["AsyncEntry", entry]);
+  for (const session of project.sessions ?? []) {
+    toEvict.push(["RealtimeSession", session]);
+    for (const note of session.notes ?? []) toEvict.push(["TimedNote", note]);
+  }
+
+  if (toEvict.some(([, entity]) => entity.dirty || entity.saving)) return;
+  for (const [store, entity] of toEvict) {
+    if (entity.id) invalidateEntry(store, entity.id);
+  }
+}
+
+/**
+ * Lightweight lookup of just the top-level project documents (no entries,
+ * notes or sessions), for sorting/filtering project lists without paying
+ * to load every project's full tree.
+ */
+async function getProjectSummaries(
+  ids: DBID[]
+): Promise<{ id: DBID; modified: Date }[]> {
+  const results = await Promise.all(
+    ids.map(async (id) => {
+      const [asyncRaw, realtimeRaw] = await Promise.allSettled([
+        get("AsyncProject", id),
+        get("RealtimeProject", id),
+      ]);
+      const raw = ((asyncRaw.status === "fulfilled" && asyncRaw.value) ||
+        (realtimeRaw.status === "fulfilled" && realtimeRaw.value) ||
+        null) as Record<string, any> | null;
+      if (!raw) return null;
+      const modified = raw.modified instanceof Date ? raw.modified : new Date(0);
+      return { id, modified };
+    })
+  );
+  return results.filter((r) => r !== null);
+}
+
+/** The user's project ids, most recently modified first. */
+export async function getUserProjectIdsByRecency(uid: string): Promise<DBID[]> {
+  const ids = await getUserProjectsIds(uid);
+  const summaries = await getProjectSummaries(ids);
+  summaries.sort((a, b) => b.modified.getTime() - a.modified.getTime());
+  return summaries.map(({ id }) => id);
+}
+
 function newEntity(type: Schema.EntityName) {
   const schema = Schema.Schema[type];
   const defaults = Object.fromEntries(
@@ -674,13 +762,8 @@ export async function getAllWellKnownDesignModelIds(): Promise<DBID[]> {
 }
 
 export async function getRecentUserProjects(uid:string, limitCount = 8) {
-  const ids = await getUserProjectsIds(uid);
-  const results = await Promise.all(
-    ids.map((id) => getProjectOrFail(id).catch(() => null))
-  );
-  const projects = results.filter((r) => r!==null);
-  projects.sort((a,b) => b[1].modified.getTime() - a[1].modified.getTime());
-  return projects.slice(0,limitCount).map(([,project]) => project.id);
+  const ids = await getUserProjectIdsByRecency(uid);
+  return ids.slice(0, limitCount);
 }
 
 /**
